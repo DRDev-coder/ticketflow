@@ -3,6 +3,20 @@
     <h1>Admin Dashboard</h1>
   </div>
 
+  <!-- Telegram Coverage Warning Banner -->
+  <div id="telegramWarningBanner" style="display:none; margin-bottom: var(--space-6); padding: var(--space-4) var(--space-5); background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.4); border-radius: var(--radius-md); color: #F59E0B;">
+    <div style="display:flex; align-items:flex-start; gap: var(--space-3);">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:2px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <div>
+        <strong>Missing Telegram Chat IDs</strong> — some open tickets will be skipped in the daily check-in:
+        <ul id="telegramWarningList" style="margin: var(--space-2) 0 0 var(--space-4); font-size: var(--text-sm);"></ul>
+        <a href="/admin/problems" style="font-size: var(--text-sm); color: #F59E0B; text-decoration: underline; margin-top: var(--space-2); display:inline-block;">
+          → Go to Problem Management to add missing Chat IDs
+        </a>
+      </div>
+    </div>
+  </div>
+
   <!-- Stats -->
   <div class="stats-grid">
     <div class="stat-card">
@@ -256,8 +270,26 @@
     return div.innerHTML;
   }
 
+  // Load missing telegram warning
+  async function loadMissingTelegram() {
+    try {
+      const res = await fetch('/api/admin/missing-telegram', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const missing = await res.json();
+      if (missing.length === 0) return;
+
+      const banner = document.getElementById('telegramWarningBanner');
+      const list = document.getElementById('telegramWarningList');
+      list.innerHTML = missing.map(m =>
+        `<li><span class="font-mono">${escapeHtml(m.email)}</span>${m.label ? ` (${escapeHtml(m.label)})` : ''} — ${m.ticketCount} open ticket(s)</li>`
+      ).join('');
+      banner.style.display = 'block';
+    } catch (err) {}
+  }
+
   // Load all
   loadStats();
   loadProblemFilter();
   loadTickets();
+  loadMissingTelegram();
 </script>

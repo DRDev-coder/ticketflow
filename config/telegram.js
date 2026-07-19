@@ -1,11 +1,24 @@
 const { TelegramBot } = require('node-telegram-bot-api');
 const Ticket = require('../models/Ticket');
+const Recipient = require('../models/Recipient');
 
 let bot = null;
 
-// In-memory state: tracks which ticket the admin is providing a "No" reason for
-// Key: chatId, Value: ticketId
+// In-memory state: tracks which ticket a responder (admin OR any recipient) is providing a reason for.
+// Key: chatId (string), Value: ticketId (string)
 const pendingReasons = {};
+
+/**
+ * Look up a Recipient by their telegramChatId.
+ * Returns the Recipient doc or null if not found.
+ */
+const findRecipientByChatId = async (chatId) => {
+  try {
+    return await Recipient.findOne({ telegramChatId: String(chatId) }).lean();
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Initialize the Telegram bot based on TELEGRAM_MODE env var.
@@ -64,6 +77,23 @@ const initTelegramBot = () => {
         );
         await bot.answerCallbackQuery(query.id, { text: '✅ Marked resolved!' });
 
+        // --- Step 9: Forward summary to admin ---
+        const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+        if (adminChatId && String(chatId) !== String(adminChatId)) {
+          const responder = await findRecipientByChatId(chatId);
+          const responderLabel = responder?.label || responder?.email || `Chat ${chatId}`;
+          const shortId = ticketId.slice(-8).toUpperCase();
+          try {
+            await bot.sendMessage(
+              adminChatId,
+              `✅ *${responderLabel}* marked ticket *#${shortId}* as resolved.`,
+              { parse_mode: 'Markdown' }
+            );
+          } catch (e) {
+            console.error('Failed to send admin summary (yes):', e.message);
+          }
+        }
+
       } else if (data.startsWith('resolve_no_')) {
         const ticketId = data.replace('resolve_no_', '');
         const ticket = await Ticket.findById(ticketId);
@@ -93,11 +123,38 @@ const initTelegramBot = () => {
     }
   });
 
+  // --- /start command handler ---
+  // Any user who messages the bot with /start gets their own Chat ID back.
+  // This lets Sabhari (or any new recipient) confirm their chat ID with our specific bot.
+  bot.onText(/^\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const firstName = msg.from?.first_name || 'there';
+    const username = msg.from?.username ? ` (@${msg.from.username})` : '';
+
+    const reply = [
+      `👋 Hi ${firstName}${username}!`,
+      ``,
+      `Your *Telegram Chat ID* with this bot is:`,
+      ``,
+      `\`${chatId}\``,
+      ``,
+      `📋 Please share this number with the admin so they can link your inbox to the ticket system.`,
+      `Once linked, you\'ll receive daily check-in messages here for any open tickets routed to you.`
+    ].join('\n');
+
+    try {
+      await bot.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
+      console.log(`📱 /start from chat ${chatId} (${firstName}${username}) — replied with their Chat ID`);
+    } catch (err) {
+      console.error('Failed to send /start reply:', err.message);
+    }
+  });
+
   // --- Handle plain text messages (reason capture) ---
   bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
 
-    // Skip if it's a command or not a text message
+    // Skip commands — handled by onText handlers above
     if (!msg.text || msg.text.startsWith('/')) return;
 
     // Check if we're waiting for a reason from this chat
@@ -130,6 +187,23 @@ const initTelegramBot = () => {
         `📝 *Noted!*\n\nTicket #${shortId} marked as *not resolved*.\nReason: _${msg.text}_\n\nThis ticket will appear again in the next daily check-in.`,
         { parse_mode: 'Markdown' }
       );
+
+      // --- Step 9: Forward summary to admin ---
+      const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+      if (adminChatId && String(chatId) !== String(adminChatId)) {
+        const responder = await findRecipientByChatId(chatId);
+        const responderLabel = responder?.label || responder?.email || `Chat ${chatId}`;
+        try {
+          await bot.sendMessage(
+            adminChatId,
+            `❌ *${responderLabel}* marked ticket *#${shortId}* as *not resolved*.
+Reason: _${msg.text}_`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (e) {
+          console.error('Failed to send admin summary (no):', e.message);
+        }
+      }
     } catch (err) {
       console.error('Telegram reason capture error:', err.message);
       await bot.sendMessage(chatId, '⚠️ Error saving reason. Please try again.');

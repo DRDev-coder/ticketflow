@@ -1,4 +1,5 @@
 const Problem = require('../models/Problem');
+const Recipient = require('../models/Recipient');
 
 /**
  * Seeds the database with initial problem categories (problem1–problem5).
@@ -28,4 +29,40 @@ const seedProblems = async () => {
   }
 };
 
-module.exports = seedProblems;
+/**
+ * Seeds the known Recipient record for Sabhari R B.
+ * Idempotent — upserts so it's safe to run multiple times.
+ */
+const seedRecipients = async () => {
+  try {
+    const result = await Recipient.findOneAndUpdate(
+      { email: 'ashborn5307393@gmail.com' },
+      {
+        $setOnInsert: {
+          email: 'ashborn5307393@gmail.com',
+          telegramChatId: '8548817278',
+          label: 'Sabhari R B'
+        }
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    const action = result.createdAt &&
+      (Date.now() - new Date(result.createdAt).getTime()) < 5000
+        ? 'Seeded'
+        : 'Already exists';
+    console.log(`✅ Recipient "${result.label}" (${result.email}) — ${action}.`);
+  } catch (err) {
+    console.error('❌ Error seeding recipient:', err.message);
+  }
+};
+
+/**
+ * Run all seeders.
+ */
+const runSeeders = async () => {
+  await seedProblems();
+  await seedRecipients();
+};
+
+module.exports = runSeeders;

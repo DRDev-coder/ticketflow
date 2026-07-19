@@ -20,8 +20,9 @@ const transporter = nodemailer.createTransport({
  * @param {string} options.description - Ticket description
  * @param {string} options.ticketId - Ticket ID
  * @param {Date} options.createdAt - Ticket creation timestamp
+ * @param {string} [options.routedTo] - If set, renders a "Routed To" row in the email (used for admin copy)
  */
-const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, description, ticketId, createdAt }) => {
+const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, description, ticketId, createdAt, routedTo }) => {
   const timestamp = new Date(createdAt).toLocaleString('en-IN', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -51,6 +52,11 @@ const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, 
             <td style="padding: 8px 0; color: #94A3B8; font-size: 13px;">Time</td>
             <td style="padding: 8px 0; font-size: 14px;">${timestamp}</td>
           </tr>
+          ${routedTo ? `
+          <tr>
+            <td style="padding: 8px 0; color: #94A3B8; font-size: 13px;">Routed To</td>
+            <td style="padding: 8px 0; font-size: 14px; color: #60A5FA; font-family: monospace;">${routedTo}</td>
+          </tr>` : ''}
         </table>
         <div style="margin-top: 16px; padding: 16px; background: #1A1E2F; border-radius: 8px; border: 1px solid #334155;">
           <p style="margin: 0 0 4px; color: #94A3B8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;">Description</p>

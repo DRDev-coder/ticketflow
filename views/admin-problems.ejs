@@ -34,6 +34,7 @@
         <tr>
           <th>Name</th>
           <th>Assigned Email</th>
+          <th>Telegram Recipient</th>
           <th>Status</th>
           <th>Tickets</th>
           <th>Created</th>
@@ -42,7 +43,7 @@
       </thead>
       <tbody id="problemsBody">
         <tr>
-          <td colspan="6" class="text-center text-muted" style="padding: 2rem;">Loading...</td>
+          <td colspan="7" class="text-center text-muted" style="padding: 2rem;">Loading...</td>
         </tr>
       </tbody>
     </table>
@@ -67,8 +68,26 @@
       <div class="form-group">
         <label for="assignedEmail">Assigned Email</label>
         <input type="email" id="assignedEmail" class="form-control" placeholder="destination@example.com" required>
+        <div class="text-xs text-muted mt-2" id="recipientStatus" style="min-height:1.2em;"></div>
       </div>
-      <div style="display: flex; gap: var(--space-3); justify-content: flex-end;">
+
+      <!-- Telegram Chat ID field — shown once assignedEmail is filled -->
+      <div class="form-group" id="telegramGroup" style="display:none;">
+        <label for="telegramChatId" style="display:flex;align-items:center;gap:var(--space-2);">
+          Telegram Chat ID
+          <span id="telegramBadge" class="text-xs" style="font-weight:400;"></span>
+        </label>
+        <input
+          type="text"
+          id="telegramChatId"
+          class="form-control font-mono"
+          placeholder="e.g. 8548817278"
+          inputmode="numeric"
+        >
+        <div class="text-xs text-muted mt-2" id="recipientLabel"></div>
+      </div>
+
+      <div style="display: flex; gap: var(--space-3); justify-content: flex-end; margin-top: var(--space-4);">
         <button type="button" class="btn btn--secondary" onclick="closeModal()">Cancel</button>
         <button type="submit" class="btn btn--primary" id="modalSubmitBtn">Add Problem</button>
       </div>
@@ -78,6 +97,7 @@
 
 <script>
   let problems = [];
+  let recipientLookupTimer = null;
 
   // Fetch and render problems
   async function loadProblems() {
@@ -85,41 +105,64 @@
       const res = await fetch('/api/admin/problems', { credentials: 'same-origin' });
       if (!res.ok) throw new Error('Failed to fetch');
       problems = await res.json();
-      renderProblems();
+
+      // Enrich with recipient info for each unique assignedEmail
+      const emails = [...new Set(problems.map(p => p.assignedEmail))];
+      const recipientMap = {};
+      await Promise.all(emails.map(async (email) => {
+        try {
+          const r = await fetch(`/api/admin/recipients?email=${encodeURIComponent(email)}`, { credentials: 'same-origin' });
+          if (r.ok) { recipientMap[email] = await r.json(); }
+        } catch {}
+      }));
+
+      renderProblems(recipientMap);
       updateStats();
     } catch (err) {
       document.getElementById('problemsBody').innerHTML =
-        '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Failed to load problems</td></tr>';
+        '<tr><td colspan="7" class="text-center text-muted" style="padding:2rem;">Failed to load problems</td></tr>';
     }
   }
 
-  function renderProblems() {
+  function renderProblems(recipientMap = {}) {
     const tbody = document.getElementById('problemsBody');
     if (problems.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">No problems found. Click "Add Problem" to create one.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:2rem;">No problems found. Click "Add Problem" to create one.</td></tr>';
       return;
     }
-    tbody.innerHTML = problems.map(p => `
-      <tr>
-        <td style="font-weight:500;">${escapeHtml(p.name)}</td>
-        <td><span class="font-mono text-sm">${escapeHtml(p.assignedEmail)}</span></td>
-        <td>
-          <span class="badge badge--${p.isActive ? 'active' : 'inactive'}">
-            ${p.isActive ? 'Active' : 'Inactive'}
-          </span>
-        </td>
-        <td><span class="font-mono">${p.ticketCount}</span></td>
-        <td class="text-muted text-sm">${new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-        <td>
-          <div style="display:flex;gap:var(--space-2);">
-            <button class="btn btn--secondary btn--sm" onclick="openEditModal('${p._id}')">Edit</button>
-            <button class="btn btn--sm ${p.isActive ? 'btn--danger' : 'btn--primary'}" onclick="toggleActive('${p._id}', ${!p.isActive})">
-              ${p.isActive ? 'Disable' : 'Enable'}
-            </button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = problems.map(p => {
+      const rec = recipientMap[p.assignedEmail];
+      let telegramCell;
+      if (!rec || !rec.found) {
+        telegramCell = '<span class="badge badge--inactive">No recipient</span>';
+      } else if (!rec.telegramChatId) {
+        telegramCell = `<span class="text-xs text-muted">${escapeHtml(rec.label || rec.email)}<br><em>No Chat ID</em></span>`;
+      } else {
+        telegramCell = `<span class="text-xs">${escapeHtml(rec.label || rec.email)}<br><span class="font-mono" style="color:var(--color-accent)">${escapeHtml(rec.telegramChatId)}</span></span>`;
+      }
+      return `
+        <tr>
+          <td style="font-weight:500;">${escapeHtml(p.name)}</td>
+          <td><span class="font-mono text-sm">${escapeHtml(p.assignedEmail)}</span></td>
+          <td>${telegramCell}</td>
+          <td>
+            <span class="badge badge--${p.isActive ? 'active' : 'inactive'}">
+              ${p.isActive ? 'Active' : 'Inactive'}
+            </span>
+          </td>
+          <td><span class="font-mono">${p.ticketCount}</span></td>
+          <td class="text-muted text-sm">${new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+          <td>
+            <div style="display:flex;gap:var(--space-2);">
+              <button class="btn btn--secondary btn--sm" onclick="openEditModal('${p._id}')">Edit</button>
+              <button class="btn btn--sm ${p.isActive ? 'btn--danger' : 'btn--primary'}" onclick="toggleActive('${p._id}', ${!p.isActive})">
+                ${p.isActive ? 'Disable' : 'Enable'}
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 
   function updateStats() {
@@ -132,13 +175,66 @@
     document.getElementById('totalTicketsCount').textContent = totalTickets;
   }
 
-  // Modal
+  // --- Recipient lookup (debounced) ---
+  async function lookupRecipient(email) {
+    const statusEl = document.getElementById('recipientStatus');
+    const groupEl = document.getElementById('telegramGroup');
+    const chatIdEl = document.getElementById('telegramChatId');
+    const badgeEl = document.getElementById('telegramBadge');
+    const labelEl = document.getElementById('recipientLabel');
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      groupEl.style.display = 'none';
+      statusEl.textContent = '';
+      return;
+    }
+
+    statusEl.textContent = 'Looking up recipient…';
+    statusEl.style.color = 'var(--color-muted)';
+
+    try {
+      const res = await fetch(`/api/admin/recipients?email=${encodeURIComponent(email)}`, { credentials: 'same-origin' });
+      const data = await res.json();
+
+      groupEl.style.display = 'block';
+
+      if (!data.found) {
+        statusEl.textContent = '⚠ No recipient record yet — fill in Chat ID below to create one.';
+        statusEl.style.color = '#F59E0B';
+        chatIdEl.value = '';
+        badgeEl.textContent = '(new)';
+        badgeEl.style.color = '#F59E0B';
+        labelEl.textContent = '';
+      } else {
+        statusEl.textContent = `✓ Recipient found: ${data.label || data.email}`;
+        statusEl.style.color = 'var(--color-accent)';
+        chatIdEl.value = data.telegramChatId || '';
+        badgeEl.textContent = data.telegramChatId ? '' : '(no Chat ID yet)';
+        badgeEl.style.color = '#F59E0B';
+        labelEl.textContent = data.label ? `Label: ${data.label}` : '';
+      }
+    } catch (err) {
+      statusEl.textContent = 'Could not look up recipient.';
+      statusEl.style.color = '#F87171';
+    }
+  }
+
+  // Wire debounce to the assignedEmail field
+  document.getElementById('assignedEmail').addEventListener('input', (e) => {
+    clearTimeout(recipientLookupTimer);
+    recipientLookupTimer = setTimeout(() => lookupRecipient(e.target.value.trim()), 600);
+  });
+
+  // --- Modals ---
   function openAddModal() {
     document.getElementById('modalTitle').textContent = 'Add Problem';
     document.getElementById('modalSubmitBtn').textContent = 'Add Problem';
     document.getElementById('editId').value = '';
     document.getElementById('problemName').value = '';
     document.getElementById('assignedEmail').value = '';
+    document.getElementById('telegramChatId').value = '';
+    document.getElementById('telegramGroup').style.display = 'none';
+    document.getElementById('recipientStatus').textContent = '';
     document.getElementById('problemModal').classList.add('active');
   }
 
@@ -150,33 +246,53 @@
     document.getElementById('editId').value = id;
     document.getElementById('problemName').value = p.name;
     document.getElementById('assignedEmail').value = p.assignedEmail;
+    document.getElementById('telegramGroup').style.display = 'none';
+    document.getElementById('recipientStatus').textContent = '';
     document.getElementById('problemModal').classList.add('active');
+    // Trigger recipient lookup immediately
+    lookupRecipient(p.assignedEmail);
   }
 
   function closeModal() {
     document.getElementById('problemModal').classList.remove('active');
   }
 
-  // Form submit
+  // --- Form submit ---
   document.getElementById('problemForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = document.getElementById('modalSubmitBtn');
     const editId = document.getElementById('editId').value;
-    const data = {
-      name: document.getElementById('problemName').value,
-      assignedEmail: document.getElementById('assignedEmail').value
+    const assignedEmail = document.getElementById('assignedEmail').value.trim();
+    const telegramChatId = document.getElementById('telegramChatId').value.trim();
+
+    const problemData = {
+      name: document.getElementById('problemName').value.trim(),
+      assignedEmail
     };
 
     const url = editId ? `/api/admin/problems/${editId}` : '/api/admin/problems';
     const method = editId ? 'PATCH' : 'POST';
 
-    const result = await submitForm(url, data, {
+    const result = await submitForm(url, problemData, {
       method,
       button: btn,
       successMessage: editId ? 'Problem updated!' : 'Problem created!'
     });
 
     if (result) {
+      // Also upsert the Recipient record with whatever Chat ID was entered
+      if (telegramChatId !== '') {
+        try {
+          await fetch('/api/admin/recipients', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ email: assignedEmail, telegramChatId })
+          });
+        } catch (err) {
+          console.warn('Could not save recipient Chat ID:', err);
+        }
+      }
       closeModal();
       loadProblems();
     }
@@ -191,23 +307,19 @@
     }
   }
 
-  // Escape HTML to prevent XSS
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
   }
 
-  // Close modal on overlay click
   document.getElementById('problemModal').addEventListener('click', (e) => {
     if (e.target === e.currentTarget) closeModal();
   });
 
-  // Close modal on Escape key
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeModal();
   });
 
-  // Load on page ready
   loadProblems();
 </script>
