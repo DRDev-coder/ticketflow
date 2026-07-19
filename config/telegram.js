@@ -1,0 +1,166 @@
+const { TelegramBot } = require('node-telegram-bot-api');
+const Ticket = require('../models/Ticket');
+
+let bot = null;
+
+// In-memory state: tracks which ticket the admin is providing a "No" reason for
+// Key: chatId, Value: ticketId
+const pendingReasons = {};
+
+/**
+ * Initialize the Telegram bot based on TELEGRAM_MODE env var.
+ * - polling: bot repeatedly asks Telegram for updates (works on localhost)
+ * - webhook: Telegram pushes updates to /api/telegram/webhook (Phase 2)
+ */
+const initTelegramBot = () => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const mode = process.env.TELEGRAM_MODE || 'polling';
+
+  if (!token) {
+    console.error('❌ TELEGRAM_BOT_TOKEN not set. Telegram bot disabled.');
+    return null;
+  }
+
+  if (mode === 'polling') {
+    bot = new TelegramBot(token, { polling: true });
+    console.log('✅ Telegram bot started (polling mode)');
+  } else if (mode === 'webhook') {
+    // In webhook mode, we don't start polling — Express handles incoming updates
+    bot = new TelegramBot(token, { polling: false });
+    console.log('✅ Telegram bot initialized (webhook mode — awaiting webhook setup)');
+  } else {
+    console.error(`❌ Unknown TELEGRAM_MODE: ${mode}. Use "polling" or "webhook".`);
+    return null;
+  }
+
+  // --- Handle callback queries (Yes/No button taps) ---
+  bot.on('callback_query', async (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.data; // e.g. "resolve_yes_<ticketId>" or "resolve_no_<ticketId>"
+    const messageId = query.message.message_id;
+
+    try {
+      if (data.startsWith('resolve_yes_')) {
+        const ticketId = data.replace('resolve_yes_', '');
+        const ticket = await Ticket.findById(ticketId);
+        if (!ticket) {
+          await bot.answerCallbackQuery(query.id, { text: 'Ticket not found' });
+          return;
+        }
+
+        ticket.status = 'resolved';
+        ticket.resolvedAt = new Date();
+        ticket.lastCheckInAt = new Date();
+        await ticket.save();
+
+        // Edit the original message to show resolved
+        await bot.editMessageText(
+          `✅ *Marked resolved!*\n\nTicket #${ticketId.slice(-8).toUpperCase()} has been resolved.`,
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'Markdown'
+          }
+        );
+        await bot.answerCallbackQuery(query.id, { text: '✅ Marked resolved!' });
+
+      } else if (data.startsWith('resolve_no_')) {
+        const ticketId = data.replace('resolve_no_', '');
+        const ticket = await Ticket.findById(ticketId);
+        if (!ticket) {
+          await bot.answerCallbackQuery(query.id, { text: 'Ticket not found' });
+          return;
+        }
+
+        // Set pending reason state
+        pendingReasons[chatId] = ticketId;
+
+        await bot.editMessageText(
+          `❌ *Not resolved yet*\n\nTicket #${ticketId.slice(-8).toUpperCase()}\n\nPlease type the reason below:`,
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'Markdown'
+          }
+        );
+        await bot.answerCallbackQuery(query.id, { text: 'Please type the reason' });
+      }
+    } catch (err) {
+      console.error('Telegram callback error:', err.message);
+      try {
+        await bot.answerCallbackQuery(query.id, { text: 'Error processing response' });
+      } catch (e) {}
+    }
+  });
+
+  // --- Handle plain text messages (reason capture) ---
+  bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+
+    // Skip if it's a command or not a text message
+    if (!msg.text || msg.text.startsWith('/')) return;
+
+    // Check if we're waiting for a reason from this chat
+    const ticketId = pendingReasons[chatId];
+    if (!ticketId) return; // No pending reason — ignore
+
+    try {
+      const ticket = await Ticket.findById(ticketId);
+      if (!ticket) {
+        await bot.sendMessage(chatId, '⚠️ Ticket not found.');
+        delete pendingReasons[chatId];
+        return;
+      }
+
+      // Append reason to log
+      ticket.reasonLog.push({
+        reason: 'not_resolved',
+        note: msg.text,
+        at: new Date()
+      });
+      ticket.status = 'not_resolved';
+      ticket.lastCheckInAt = new Date();
+      await ticket.save();
+
+      // Clean up pending state
+      delete pendingReasons[chatId];
+
+      const shortId = ticketId.slice(-8).toUpperCase();
+      await bot.sendMessage(chatId,
+        `📝 *Noted!*\n\nTicket #${shortId} marked as *not resolved*.\nReason: _${msg.text}_\n\nThis ticket will appear again in the next daily check-in.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (err) {
+      console.error('Telegram reason capture error:', err.message);
+      await bot.sendMessage(chatId, '⚠️ Error saving reason. Please try again.');
+      delete pendingReasons[chatId];
+    }
+  });
+
+  // Handle polling errors gracefully
+  bot.on('polling_error', (err) => {
+    if (err.code === 'ETELEGRAM' && err.response?.statusCode === 409) {
+      console.warn('⚠️ Telegram polling conflict — another instance may be running.');
+    } else {
+      console.error('Telegram polling error:', err.message);
+    }
+  });
+
+  return bot;
+};
+
+/**
+ * Get the bot instance.
+ */
+const getBot = () => bot;
+
+/**
+ * Process a webhook update (used in webhook mode / Phase 2).
+ */
+const processWebhookUpdate = (update) => {
+  if (bot) {
+    bot.processUpdate(update);
+  }
+};
+
+module.exports = { initTelegramBot, getBot, processWebhookUpdate };

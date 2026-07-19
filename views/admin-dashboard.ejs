@@ -1,0 +1,263 @@
+<div class="container">
+  <div class="page-header">
+    <h1>Admin Dashboard</h1>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-card__value" id="statTotal">-</div>
+      <div class="stat-card__label">Total Tickets</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value text-info" id="statOpen" style="color:#60A5FA;">-</div>
+      <div class="stat-card__label">Open</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" id="statResolved">-</div>
+      <div class="stat-card__label">Resolved</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" id="statNotResolved" style="color:#F87171;">-</div>
+      <div class="stat-card__label">Not Resolved</div>
+    </div>
+  </div>
+
+  <!-- Filter Bar -->
+  <div class="filter-bar">
+    <select id="statusFilter" class="form-control" onchange="loadTickets()">
+      <option value="">All Statuses</option>
+      <option value="open">Open</option>
+      <option value="resolved">Resolved</option>
+      <option value="not_resolved">Not Resolved</option>
+    </select>
+    <select id="problemFilter" class="form-control" onchange="loadTickets()">
+      <option value="">All Categories</option>
+    </select>
+  </div>
+
+  <!-- Tickets Table -->
+  <div id="ticketsContainer">
+    <div class="text-center text-muted" style="padding: 3rem;">Loading tickets...</div>
+  </div>
+</div>
+
+<!-- Status Change Modal -->
+<div class="modal-overlay" id="statusModal">
+  <div class="modal">
+    <div class="modal__header">
+      <h3>Update Ticket Status</h3>
+      <button class="modal__close" onclick="closeStatusModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="mb-4">
+      <p class="text-sm text-muted">Ticket: <span class="ticket-id" id="modalTicketId"></span></p>
+    </div>
+    <form id="statusForm">
+      <input type="hidden" id="statusTicketId" value="">
+      <div class="form-group">
+        <label for="newStatus">New Status</label>
+        <select id="newStatus" class="form-control" required onchange="toggleNoteField()">
+          <option value="open">Open</option>
+          <option value="resolved">Resolved</option>
+          <option value="not_resolved">Not Resolved</option>
+        </select>
+      </div>
+      <div class="form-group" id="noteGroup" style="display:none;">
+        <label for="statusNote">Reason / Note</label>
+        <textarea id="statusNote" class="form-control" placeholder="Why is this not resolved?" rows="3"></textarea>
+      </div>
+      <div style="display: flex; gap: var(--space-3); justify-content: flex-end;">
+        <button type="button" class="btn btn--secondary" onclick="closeStatusModal()">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="statusSubmitBtn">Update Status</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Load stats
+  async function loadStats() {
+    try {
+      const res = await fetch('/api/admin/stats', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed');
+      const stats = await res.json();
+      document.getElementById('statTotal').textContent = stats.total;
+      document.getElementById('statOpen').textContent = stats.open;
+      document.getElementById('statResolved').textContent = stats.resolved;
+      document.getElementById('statNotResolved').textContent = stats.notResolved;
+    } catch (err) {}
+  }
+
+  // Load problem filter options
+  async function loadProblemFilter() {
+    try {
+      const res = await fetch('/api/admin/problems', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed');
+      const problems = await res.json();
+      const select = document.getElementById('problemFilter');
+      select.innerHTML = '<option value="">All Categories</option>' +
+        problems.map(p => `<option value="${p._id}">${escapeHtml(p.name)}</option>`).join('');
+    } catch (err) {}
+  }
+
+  // Load tickets
+  async function loadTickets() {
+    try {
+      const status = document.getElementById('statusFilter').value;
+      const problemId = document.getElementById('problemFilter').value;
+      let url = '/api/admin/tickets?';
+      if (status) url += `status=${status}&`;
+      if (problemId) url += `problemId=${problemId}&`;
+
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed');
+      const tickets = await res.json();
+      renderTickets(tickets);
+    } catch (err) {
+      document.getElementById('ticketsContainer').innerHTML =
+        '<div class="text-center text-muted" style="padding:3rem;">Failed to load tickets</div>';
+    }
+  }
+
+  function renderTickets(tickets) {
+    const container = document.getElementById('ticketsContainer');
+
+    if (tickets.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <h3>No tickets found</h3>
+          <p>No tickets match the current filters.</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>User</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tickets.map(t => `
+              <tr>
+                <td><span class="ticket-id">#${t.shortId}</span></td>
+                <td>
+                  <div style="font-weight:500;font-size:var(--text-sm);">${escapeHtml(t.userName)}</div>
+                  <div class="text-xs text-muted">${escapeHtml(t.userEmail)}</div>
+                </td>
+                <td style="font-weight:500;">${escapeHtml(t.problemName)}</td>
+                <td class="text-muted text-sm" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(t.description)}">${escapeHtml(t.description)}</td>
+                <td><span class="badge badge--${t.status}">${formatStatus(t.status)}</span></td>
+                <td class="text-muted text-sm">${formatDate(t.createdAt)}</td>
+                <td>
+                  <button class="btn btn--secondary btn--sm" onclick="openStatusModal('${t._id}', '${t.shortId}', '${t.status}')">
+                    Change
+                  </button>
+                </td>
+              </tr>
+              ${t.reasonLog && t.reasonLog.length > 0 ? `
+              <tr>
+                <td colspan="7" style="padding:0 var(--space-4) var(--space-3); background: rgba(30,41,59,0.3);">
+                  <details>
+                    <summary class="text-xs text-muted" style="cursor:pointer; padding: var(--space-2) 0;">
+                      ${t.reasonLog.length} reason log ${t.reasonLog.length === 1 ? 'entry' : 'entries'}
+                    </summary>
+                    <div style="padding: var(--space-2) 0;">
+                      ${t.reasonLog.map(r => `
+                        <div style="padding: var(--space-1) 0; font-size: var(--text-xs); color: var(--color-muted);">
+                          <span style="color: #F87171;">✗</span> ${escapeHtml(r.note || 'No note')}
+                          <span style="margin-left: var(--space-2); opacity:0.6;">${formatDate(r.at)}</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </details>
+                </td>
+              </tr>` : ''}
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // Status modal
+  function openStatusModal(id, shortId, currentStatus) {
+    document.getElementById('statusTicketId').value = id;
+    document.getElementById('modalTicketId').textContent = '#' + shortId;
+    document.getElementById('newStatus').value = currentStatus;
+    document.getElementById('statusNote').value = '';
+    toggleNoteField();
+    document.getElementById('statusModal').classList.add('active');
+  }
+
+  function closeStatusModal() {
+    document.getElementById('statusModal').classList.remove('active');
+  }
+
+  function toggleNoteField() {
+    const status = document.getElementById('newStatus').value;
+    document.getElementById('noteGroup').style.display = status === 'not_resolved' ? 'block' : 'none';
+  }
+
+  document.getElementById('statusForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('statusTicketId').value;
+    const btn = document.getElementById('statusSubmitBtn');
+    const data = {
+      status: document.getElementById('newStatus').value,
+      note: document.getElementById('statusNote').value
+    };
+
+    const result = await submitForm(`/api/admin/tickets/${id}`, data, {
+      method: 'PATCH',
+      button: btn,
+      successMessage: 'Ticket status updated!'
+    });
+
+    if (result) {
+      closeStatusModal();
+      loadTickets();
+      loadStats();
+    }
+  });
+
+  // Close modals on overlay click / escape
+  document.getElementById('statusModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeStatusModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeStatusModal();
+  });
+
+  function formatStatus(s) {
+    return s === 'not_resolved' ? 'Not Resolved' : s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function formatDate(d) {
+    return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // Load all
+  loadStats();
+  loadProblemFilter();
+  loadTickets();
+</script>

@@ -1,0 +1,213 @@
+<div class="container">
+  <div class="page-header">
+    <h1>Problem Management</h1>
+    <button class="btn btn--primary" onclick="openAddModal()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add Problem
+    </button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card">
+      <div class="stat-card__value" id="totalProblems">-</div>
+      <div class="stat-card__label">Total Problems</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" id="activeProblems">-</div>
+      <div class="stat-card__label">Active</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" id="inactiveProblems">-</div>
+      <div class="stat-card__label">Inactive</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" id="totalTicketsCount">-</div>
+      <div class="stat-card__label">Total Tickets</div>
+    </div>
+  </div>
+
+  <!-- Problems Table -->
+  <div class="table-wrapper" id="problemsTable">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Assigned Email</th>
+          <th>Status</th>
+          <th>Tickets</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="problemsBody">
+        <tr>
+          <td colspan="6" class="text-center text-muted" style="padding: 2rem;">Loading...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="problemModal">
+  <div class="modal">
+    <div class="modal__header">
+      <h3 id="modalTitle">Add Problem</h3>
+      <button class="modal__close" onclick="closeModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form id="problemForm">
+      <input type="hidden" id="editId" value="">
+      <div class="form-group">
+        <label for="problemName">Problem Name</label>
+        <input type="text" id="problemName" class="form-control" placeholder="e.g. Login Issue" required>
+      </div>
+      <div class="form-group">
+        <label for="assignedEmail">Assigned Email</label>
+        <input type="email" id="assignedEmail" class="form-control" placeholder="destination@example.com" required>
+      </div>
+      <div style="display: flex; gap: var(--space-3); justify-content: flex-end;">
+        <button type="button" class="btn btn--secondary" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="modalSubmitBtn">Add Problem</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  let problems = [];
+
+  // Fetch and render problems
+  async function loadProblems() {
+    try {
+      const res = await fetch('/api/admin/problems', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed to fetch');
+      problems = await res.json();
+      renderProblems();
+      updateStats();
+    } catch (err) {
+      document.getElementById('problemsBody').innerHTML =
+        '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Failed to load problems</td></tr>';
+    }
+  }
+
+  function renderProblems() {
+    const tbody = document.getElementById('problemsBody');
+    if (problems.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">No problems found. Click "Add Problem" to create one.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = problems.map(p => `
+      <tr>
+        <td style="font-weight:500;">${escapeHtml(p.name)}</td>
+        <td><span class="font-mono text-sm">${escapeHtml(p.assignedEmail)}</span></td>
+        <td>
+          <span class="badge badge--${p.isActive ? 'active' : 'inactive'}">
+            ${p.isActive ? 'Active' : 'Inactive'}
+          </span>
+        </td>
+        <td><span class="font-mono">${p.ticketCount}</span></td>
+        <td class="text-muted text-sm">${new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+        <td>
+          <div style="display:flex;gap:var(--space-2);">
+            <button class="btn btn--secondary btn--sm" onclick="openEditModal('${p._id}')">Edit</button>
+            <button class="btn btn--sm ${p.isActive ? 'btn--danger' : 'btn--primary'}" onclick="toggleActive('${p._id}', ${!p.isActive})">
+              ${p.isActive ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function updateStats() {
+    const active = problems.filter(p => p.isActive).length;
+    const inactive = problems.length - active;
+    const totalTickets = problems.reduce((sum, p) => sum + p.ticketCount, 0);
+    document.getElementById('totalProblems').textContent = problems.length;
+    document.getElementById('activeProblems').textContent = active;
+    document.getElementById('inactiveProblems').textContent = inactive;
+    document.getElementById('totalTicketsCount').textContent = totalTickets;
+  }
+
+  // Modal
+  function openAddModal() {
+    document.getElementById('modalTitle').textContent = 'Add Problem';
+    document.getElementById('modalSubmitBtn').textContent = 'Add Problem';
+    document.getElementById('editId').value = '';
+    document.getElementById('problemName').value = '';
+    document.getElementById('assignedEmail').value = '';
+    document.getElementById('problemModal').classList.add('active');
+  }
+
+  function openEditModal(id) {
+    const p = problems.find(x => x._id === id);
+    if (!p) return;
+    document.getElementById('modalTitle').textContent = 'Edit Problem';
+    document.getElementById('modalSubmitBtn').textContent = 'Save Changes';
+    document.getElementById('editId').value = id;
+    document.getElementById('problemName').value = p.name;
+    document.getElementById('assignedEmail').value = p.assignedEmail;
+    document.getElementById('problemModal').classList.add('active');
+  }
+
+  function closeModal() {
+    document.getElementById('problemModal').classList.remove('active');
+  }
+
+  // Form submit
+  document.getElementById('problemForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('modalSubmitBtn');
+    const editId = document.getElementById('editId').value;
+    const data = {
+      name: document.getElementById('problemName').value,
+      assignedEmail: document.getElementById('assignedEmail').value
+    };
+
+    const url = editId ? `/api/admin/problems/${editId}` : '/api/admin/problems';
+    const method = editId ? 'PATCH' : 'POST';
+
+    const result = await submitForm(url, data, {
+      method,
+      button: btn,
+      successMessage: editId ? 'Problem updated!' : 'Problem created!'
+    });
+
+    if (result) {
+      closeModal();
+      loadProblems();
+    }
+  });
+
+  // Toggle active/inactive
+  async function toggleActive(id, isActive) {
+    const result = await submitForm(`/api/admin/problems/${id}`, { isActive }, { method: 'PATCH' });
+    if (result) {
+      showAlert(isActive ? 'Problem enabled' : 'Problem disabled', 'success');
+      loadProblems();
+    }
+  }
+
+  // Escape HTML to prevent XSS
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // Close modal on overlay click
+  document.getElementById('problemModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // Load on page ready
+  loadProblems();
+</script>

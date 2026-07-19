@@ -1,0 +1,108 @@
+<div class="container">
+  <div class="page-header">
+    <h1>My Tickets</h1>
+    <a href="/raise-ticket" class="btn btn--primary">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Raise Ticket
+    </a>
+  </div>
+
+  <!-- Filter Bar -->
+  <div class="filter-bar">
+    <select id="statusFilter" class="form-control" onchange="filterTickets()">
+      <option value="">All Statuses</option>
+      <option value="open">Open</option>
+      <option value="resolved">Resolved</option>
+      <option value="not_resolved">Not Resolved</option>
+    </select>
+  </div>
+
+  <!-- Tickets List -->
+  <div id="ticketsContainer">
+    <div class="text-center text-muted" style="padding: 3rem;">Loading tickets...</div>
+  </div>
+</div>
+
+<script>
+  let allTickets = [];
+
+  async function loadTickets() {
+    try {
+      const res = await fetch('/api/tickets/mine', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed to fetch');
+      allTickets = await res.json();
+      filterTickets();
+    } catch (err) {
+      document.getElementById('ticketsContainer').innerHTML =
+        '<div class="text-center text-muted" style="padding:3rem;">Failed to load tickets</div>';
+    }
+  }
+
+  function filterTickets() {
+    const status = document.getElementById('statusFilter').value;
+    const filtered = status ? allTickets.filter(t => t.status === status) : allTickets;
+    renderTickets(filtered);
+  }
+
+  function renderTickets(tickets) {
+    const container = document.getElementById('ticketsContainer');
+
+    if (tickets.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <h3>No tickets found</h3>
+          <p>${document.getElementById('statusFilter').value ? 'No tickets match this filter.' : 'You haven\'t raised any tickets yet.'}</p>
+          <a href="/raise-ticket" class="btn btn--primary mt-4">Raise Your First Ticket</a>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticket ID</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tickets.map(t => `
+              <tr>
+                <td><span class="ticket-id">#${t.shortId}</span></td>
+                <td style="font-weight:500;">${escapeHtml(t.problemName)}</td>
+                <td class="text-muted text-sm" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(t.description)}</td>
+                <td><span class="badge badge--${t.status}">${formatStatus(t.status)}</span></td>
+                <td class="text-muted text-sm">${formatDate(t.createdAt)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function formatStatus(s) {
+    return s === 'not_resolved' ? 'Not Resolved' : s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function formatDate(d) {
+    return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  loadTickets();
+</script>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Internal Ticket Routing System — Raise and track tickets with email notifications">
+  <title><%= typeof title !== 'undefined' ? title + ' — Ticket System' : 'Ticket System' %></title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="container">
+      <a href="/" class="navbar__brand">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 5v2"/>
+          <path d="M15 11v2"/>
+          <path d="M15 17v2"/>
+          <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/>
+        </svg>
+        TicketFlow
+      </a>
+      <ul class="navbar__links">
+        <% if (typeof user !== 'undefined' && user) { %>
+          <% if (user.role === 'admin') { %>
+            <li><a href="/admin/dashboard">Dashboard</a></li>
+            <li><a href="/admin/problems">Problems</a></li>
+          <% } else { %>
+            <li><a href="/raise-ticket">Raise Ticket</a></li>
+            <li><a href="/my-tickets">My Tickets</a></li>
+          <% } %>
+          <li>
+            <a href="#" data-action="logout" style="color: var(--color-muted);">
+              Logout
+            </a>
+          </li>
+        <% } else { %>
+          <li><a href="/login">Login</a></li>
+          <li><a href="/signup">Sign Up</a></li>
+          <li><a href="/admin/login" class="text-muted text-xs">Admin</a></li>
+        <% } %>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main>
+    <div class="alert-container"></div>
+    <%- body %>
+  </main>
+
+  <script src="/js/main.js"></script>
+</body>
+</html>

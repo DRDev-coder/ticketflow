@@ -1,0 +1,104 @@
+<div class="container container--medium">
+  <div class="page-header">
+    <h1>Raise a Ticket</h1>
+  </div>
+
+  <div class="card card--elevated">
+    <form id="raiseTicketForm">
+      <div class="form-group">
+        <label for="problemSelect">Problem Category</label>
+        <select id="problemSelect" class="form-control" required>
+          <option value="">Loading categories...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="description">Description</label>
+        <textarea
+          id="description"
+          class="form-control"
+          placeholder="Describe your issue in detail (minimum 10 characters)..."
+          required
+          minlength="10"
+          rows="5"
+        ></textarea>
+        <div class="text-xs text-muted mt-2" id="charCount">0 characters</div>
+      </div>
+      <button type="submit" class="btn btn--primary btn--block btn--lg" id="submitTicketBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Submit Ticket
+      </button>
+    </form>
+  </div>
+
+  <!-- Success confirmation (hidden by default) -->
+  <div id="successCard" class="card card--elevated mt-6 hidden" style="text-align:center;">
+    <div style="margin-bottom: var(--space-4);">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    </div>
+    <h2>Ticket Submitted!</h2>
+    <p>Your ticket <span class="ticket-id" id="newTicketId"></span> has been created successfully.</p>
+    <p class="text-sm text-muted">An email notification has been sent to the assigned team.</p>
+    <div style="margin-top: var(--space-6); display: flex; gap: var(--space-3); justify-content: center;">
+      <a href="/my-tickets" class="btn btn--secondary">View My Tickets</a>
+      <button class="btn btn--primary" onclick="resetForm()">Raise Another</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Load problem categories
+  async function loadCategories() {
+    try {
+      const res = await fetch('/api/problems', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed to fetch');
+      const problems = await res.json();
+      const select = document.getElementById('problemSelect');
+      select.innerHTML = '<option value="">Select a category...</option>' +
+        problems.map(p => `<option value="${p._id}">${escapeHtml(p.name)}</option>`).join('');
+    } catch (err) {
+      document.getElementById('problemSelect').innerHTML = '<option value="">Failed to load categories</option>';
+    }
+  }
+
+  // Character counter
+  document.getElementById('description').addEventListener('input', (e) => {
+    document.getElementById('charCount').textContent = `${e.target.value.length} characters`;
+  });
+
+  // Form submit
+  document.getElementById('raiseTicketForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('submitTicketBtn');
+    const data = {
+      problemId: document.getElementById('problemSelect').value,
+      description: document.getElementById('description').value
+    };
+
+    if (!data.problemId) {
+      showAlert('Please select a problem category', 'error');
+      return;
+    }
+
+    const result = await submitForm('/api/tickets', data, { button: btn });
+    if (result) {
+      document.getElementById('raiseTicketForm').closest('.card').classList.add('hidden');
+      document.getElementById('newTicketId').textContent = '#' + result.ticket.shortId;
+      document.getElementById('successCard').classList.remove('hidden');
+    }
+  });
+
+  function resetForm() {
+    document.getElementById('raiseTicketForm').reset();
+    document.getElementById('charCount').textContent = '0 characters';
+    document.getElementById('raiseTicketForm').closest('.card').classList.remove('hidden');
+    document.getElementById('successCard').classList.add('hidden');
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  loadCategories();
+</script>
