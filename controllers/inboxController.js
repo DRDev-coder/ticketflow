@@ -9,6 +9,7 @@ const InboxMessage = require('../models/InboxMessage');
 const Problem      = require('../models/Problem');
 const { fetchEmails }    = require('../config/imap');
 const { classifyEmail }  = require('../config/gemini');
+const { sendReplyEmail } = require('../config/mailer');
 
 /** How many days back to fetch on the very first sync (no messages in DB yet). */
 const INITIAL_SYNC_DAYS = parseInt(process.env.INBOX_SYNC_DAYS_BACK || '30', 10);
@@ -248,5 +249,135 @@ const reassignToOthers = async (problemId) => {
   console.log(`📬 Reassigned ${result.modifiedCount} message(s) to Others (problem ${problemId} deleted)`);
 };
 
+/**
+ * POST /api/admin/inbox/messages/:id/reply
+ * Admin sends an email reply to the original sender via Brevo.
+ */
+const replyToMessage = async (req, res) => {
+  try {
+    const msg = await InboxMessage.findById(req.params.id).lean();
+    if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+    const { body } = req.body;
+    if (!body || !body.trim()) {
+      return res.status(400).json({ error: 'Reply body cannot be empty' });
+    }
+
+    const subject = msg.subject.startsWith('Re:') ? msg.subject : `Re: ${msg.subject}`;
+    const originalSnippet = (msg.bodyText || '').substring(0, 300);
+
+    await sendReplyEmail({
+      to: msg.fromEmail,
+      subject,
+      replyBody: body.trim(),
+      originalSnippet
+    });
+
+    console.log(`📧 Admin reply sent → ${msg.fromEmail} (Re: ${msg.subject})`);
+    res.json({ message: `Reply sent to ${msg.fromEmail}` });
+  } catch (err) {
+    console.error('replyToMessage error:', err);
+    res.status(500).json({ error: `Failed to send reply: ${err.message}` });
+  }
+};
+
+/**
+ * PATCH /api/admin/inbox/messages/:id/move
+ * Manually move a message to a different problem group (or "Others").
+ * Body: { problemId: "<id>" | null }
+ */
+const moveMessage = async (req, res) => {
+  try {
+    const { problemId } = req.body;
+
+    let problemName = 'Others';
+    let pid = null;
+
+    if (problemId && problemId !== 'null') {
+      const problem = await Problem.findById(problemId).lean();
+      if (!problem) return res.status(404).json({ error: 'Problem not found' });
+      problemName = problem.name;
+      pid = problem._id;
+    }
+
+    await InboxMessage.findByIdAndUpdate(req.params.id, {
+      $set: { problemId: pid, problemName }
+    });
+
+    res.json({ message: `Moved to "${problemName}"`, problemName });
+  } catch (err) {
+    console.error('moveMessage error:', err);
+    res.status(500).json({ error: 'Failed to move message' });
+  }
+};
+
+/**
+ * POST /api/admin/inbox/reclassify
+ * Re-runs Gemini classification on ALL messages currently in "Others".
+ * Call this after setting GEMINI_API_KEY or adding new problem categories.
+ * Optionally pass { all: true } in body to reclassify every message (not just Others).
+ */
+const reclassifyOthers = async (req, res) => {
+  try {
+    const reclassifyAll = req.body?.all === true;
+
+    const filter = reclassifyAll ? {} : { problemId: null };
+    const messages = await InboxMessage.find(filter).lean();
+
+    if (messages.length === 0) {
+      return res.json({ message: 'No messages to re-classify', reclassified: 0 });
+    }
+
+    const problems = await Problem.find({ isActive: true }).select('_id name').lean();
+    const problemNames = problems.map(p => p.name);
+    const nameToId = {};
+    problems.forEach(p => { nameToId[p.name] = p._id; });
+
+    let reclassified = 0;
+    let failed = 0;
+
+    for (const msg of messages) {
+      try {
+        const classified = await classifyEmail(msg.subject, msg.bodyText, problemNames);
+        const newPid  = (classified !== 'Others' && nameToId[classified]) ? nameToId[classified] : null;
+        const newName = newPid ? classified : 'Others';
+
+        // Only update if classification actually changed
+        const currentPid = msg.problemId ? msg.problemId.toString() : null;
+        const newPidStr  = newPid ? newPid.toString() : null;
+        if (currentPid !== newPidStr) {
+          await InboxMessage.findByIdAndUpdate(msg._id, {
+            $set: { problemId: newPid, problemName: newName }
+          });
+          if (newPid) reclassified++;
+        }
+
+        // Small delay to avoid Gemini rate limits
+        await new Promise(r => setTimeout(r, 300));
+      } catch (err) {
+        console.error(`Reclassify failed for "${msg.subject}":`, err.message);
+        failed++;
+      }
+    }
+
+    console.log(`✅ Reclassify complete: ${reclassified} moved out of Others, ${failed} failed`);
+    res.json({
+      message: `Re-classification complete: ${reclassified} message(s) moved to the correct group`,
+      reclassified,
+      failed,
+      total: messages.length
+    });
+  } catch (err) {
+    console.error('reclassifyOthers error:', err);
+    res.status(500).json({ error: 'Re-classification failed' });
+  }
+};
+
 // Export runSync so server.js can call it on startup and from the cron
-module.exports = { syncInbox, getGroups, getGroupMessages, markMessageRead, markGroupRead, reassignToOthers, runSync };
+module.exports = {
+  syncInbox, getGroups, getGroupMessages,
+  markMessageRead, markGroupRead,
+  replyToMessage, moveMessage, reclassifyOthers,
+  reassignToOthers, runSync
+};
+

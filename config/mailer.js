@@ -174,4 +174,33 @@ const verifyMailer = async () => {
   }
 };
 
-module.exports = { sendTicketEmail, sendOtpEmail, verifyMailer };
+/**
+ * sendReplyEmail — admin replies to an email from the inbox.
+ * @param {Object} opts
+ *   to          — recipient email address
+ *   subject     — subject line (should start with "Re:")
+ *   replyBody   — plain-text reply composed by admin
+ *   originalSnippet — first 200 chars of the original message (quoted below the reply)
+ */
+const sendReplyEmail = async ({ to, subject, replyBody, originalSnippet }) => {
+  const htmlContent = `
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0F172A;color:#E2E8F0;border-radius:12px;overflow:hidden;">
+      <div style="background:linear-gradient(135deg,#22C55E,#16A34A);padding:20px 24px;">
+        <h2 style="margin:0;color:#fff;font-size:18px;">Reply from TicketFlow Support</h2>
+      </div>
+      <div style="padding:24px;">
+        <p style="white-space:pre-wrap;line-height:1.7;color:#E2E8F0;margin:0 0 24px;">${replyBody.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
+        ${originalSnippet ? `
+        <div style="border-left:3px solid #334155;padding:12px 16px;margin-top:16px;color:#94A3B8;font-size:13px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;color:#64748B;">Original message</div>
+          <p style="margin:0;white-space:pre-wrap;">${originalSnippet.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
+        </div>` : ''}
+        <hr style="border:none;border-top:1px solid #1E293B;margin:24px 0;">
+        <p style="color:#64748B;font-size:12px;margin:0;">This reply was sent via TicketFlow Admin.</p>
+      </div>
+    </div>`;
+
+  await sendViaBrevo({ to, subject, htmlContent });
+};
+
+module.exports = { sendTicketEmail, sendOtpEmail, sendReplyEmail, verifyMailer };
