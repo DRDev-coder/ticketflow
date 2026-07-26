@@ -1,5 +1,6 @@
 const Problem = require('../models/Problem');
 const Ticket = require('../models/Ticket');
+const InboxMessage = require('../models/InboxMessage');
 
 /**
  * GET /api/admin/problems
@@ -113,4 +114,36 @@ const listActiveProblems = async (req, res) => {
   }
 };
 
-module.exports = { listProblems, createProblem, updateProblem, listActiveProblems };
+/**
+ * DELETE /api/admin/problems/:id
+ * Delete a problem category (admin only).
+ * Reassigns its inbox messages to "Others" before deleting.
+ */
+const deleteProblem = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const problem = await Problem.findById(id);
+    if (!problem) {
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
+    // Move any classified inbox messages to "Others" before deleting
+    const moved = await InboxMessage.updateMany(
+      { problemId: id },
+      { $set: { problemId: null, problemName: 'Others' } }
+    );
+    if (moved.modifiedCount > 0) {
+      console.log(`📬 Moved ${moved.modifiedCount} inbox message(s) to Others (problem "${problem.name}" deleted)`);
+    }
+
+    await Problem.findByIdAndDelete(id);
+
+    res.json({ message: `Problem "${problem.name}" deleted successfully` });
+  } catch (err) {
+    console.error('Delete problem error:', err);
+    res.status(500).json({ error: 'Failed to delete problem' });
+  }
+};
+
+module.exports = { listProblems, createProblem, updateProblem, listActiveProblems, deleteProblem };

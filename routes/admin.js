@@ -4,7 +4,8 @@ const { requireAdmin } = require('../middleware/auth');
 const {
   listProblems,
   createProblem,
-  updateProblem
+  updateProblem,
+  deleteProblem
 } = require('../controllers/problemController');
 const {
   listAllTickets,
@@ -15,9 +16,10 @@ const {
 const { getRecipient, upsertRecipient } = require('../controllers/recipientController');
 
 // Problem management (admin only)
-router.get('/api/admin/problems', requireAdmin, listProblems);
-router.post('/api/admin/problems', requireAdmin, createProblem);
+router.get('/api/admin/problems',       requireAdmin, listProblems);
+router.post('/api/admin/problems',      requireAdmin, createProblem);
 router.patch('/api/admin/problems/:id', requireAdmin, updateProblem);
+router.delete('/api/admin/problems/:id',requireAdmin, deleteProblem);
 
 // Ticket management (admin only)
 router.get('/api/admin/tickets', requireAdmin, listAllTickets);

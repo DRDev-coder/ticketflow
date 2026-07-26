@@ -1,0 +1,67 @@
+==================================================
+        TICKETFLOW - FULL DOCUMENTATION
+==================================================
+
+1. WHAT IS TICKETFLOW?
+--------------------------------------------------
+TicketFlow is a lightweight, internal helpdesk and ticketing system. It allows users to report problems (like "Login Issue" or "Payment Problem"), routes those problems to the correct support team via email, and uses a Telegram Bot to automatically check in with the support team every day to ensure tickets get resolved.
+
+
+2. MAIN FEATURES
+--------------------------------------------------
+* For Regular Users:
+  - Sign up and log in securely.
+  - Create a new support ticket by selecting a problem category and typing a description.
+  - View a dashboard of their past tickets to see if they are "Open" or "Resolved".
+
+* For Administrators (Admin):
+  - Log in using a special, hardcoded admin account.
+  - View an Admin Dashboard showing stats (Total Tickets, Open Tickets, etc.).
+  - See a list of all tickets and manually change their status if needed.
+  - Manage "Problems" (categories): Create new problem categories, edit who they are assigned to, and link them to specific Telegram Chat IDs.
+  - Get a daily summary message on Telegram showing how many tickets are pending.
+
+* For Support Staff (Recipients):
+  - Receive an instant, beautifully styled HTML email whenever a ticket is assigned to them.
+  - Receive a daily "Check-In" message directly on Telegram for any open tickets.
+  - Can simply tap " Yes, resolved" or " No, not yet" right inside Telegram.
+  - If they tap "No", the bot asks them to type a reason, which is saved to the system.
+
+
+3. HOW THE FLOW WORKS (STEP-BY-STEP)
+--------------------------------------------------
+Step A: A user logs in and submits a ticket (e.g., "Login Issue").
+Step B: The system immediately sends TWO emails:
+        1. An email to the support staff assigned to "Login Issue" (e.g., ashborn...).
+        2. A backup "Admin Copy" email to the admin (darshan...), clearly stating who the ticket was routed to.
+Step C: Every day (via a daily check-in trigger), the system looks for tickets that are still "Open".
+Step D: The Telegram Bot sends a direct message to the assigned support staff member's Telegram app asking: "Is this resolved?"
+Step E: The support staff taps a button on their phone to answer. 
+Step F: The Admin gets a quick Telegram message letting them know the staff member updated the ticket.
+
+
+4. TELEGRAM BOT INTEGRATION
+--------------------------------------------------
+- /start Command: If anyone messages the bot and says "/start", the bot replies with their numeric Telegram Chat ID. They can give this ID to the Admin.
+- The Admin enters that Chat ID into the Admin Dashboard. From then on, that person receives the daily check-ins for their tickets.
+- Missing Chat IDs: If a ticket is open but the staff member doesn't have a Telegram Chat ID in the system, the Admin Dashboard shows a bright orange warning banner so the admin can fix it.
+
+
+5. TECHNOLOGY STACK (What it was built with)
+--------------------------------------------------
+- Backend: Node.js with Express.js (The engine running the server)
+- Database: MongoDB Atlas (Cloud database storing users, tickets, and problems)
+- Frontend: EJS Templates + HTML/CSS (Server-rendered pages, no React needed)
+- Emails: Nodemailer using a Gmail App Password
+- Telegram: node-telegram-bot-api (Running in "polling" mode so it works perfectly on a local computer)
+- Security: Passwords are encrypted using bcrypt, and logins use JWT (JSON Web Tokens) stored in secure httpOnly cookies.
+
+
+6. HOW TO RUN THE PROJECT
+--------------------------------------------------
+1. Make sure you have Node.js installed.
+2. Open the project folder in your terminal.
+3. Make sure you have your `.env` file set up with your MongoDB, Gmail, and Telegram passwords.
+4. Run: `npm install` (to install dependencies)
+5. Run: `npm run dev` (to start the server)
+6. Open your browser and go to: http://localhost:3000

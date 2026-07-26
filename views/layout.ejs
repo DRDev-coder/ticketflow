@@ -25,6 +25,18 @@
           <% if (user.role === 'admin') { %>
             <li><a href="/admin/dashboard">Dashboard</a></li>
             <li><a href="/admin/problems">Problems</a></li>
+            <li>
+              <a href="/admin/inbox" style="position:relative; display:inline-flex; align-items:center; gap:5px;">
+                Inbox
+                <span id="inboxUnreadDot" style="
+                  display:none;
+                  width:8px; height:8px;
+                  background:#f87171;
+                  border-radius:50%;
+                  flex-shrink:0;
+                "></span>
+              </a>
+            </li>
           <% } else { %>
             <li><a href="/raise-ticket">Raise Ticket</a></li>
             <li><a href="/my-tickets">My Tickets</a></li>
@@ -50,5 +62,20 @@
   </main>
 
   <script src="/js/main.js"></script>
+  <% if (typeof user !== 'undefined' && user && user.role === 'admin') { %>
+  <script>
+    // Fetch total unread inbox count and show/hide the nav dot on every admin page
+    (async () => {
+      try {
+        const res  = await fetch('/api/admin/inbox/groups');
+        if (!res.ok) return;
+        const data = await res.json();
+        const total = (data.groups || []).reduce((s, g) => s + g.unread, 0);
+        const dot   = document.getElementById('inboxUnreadDot');
+        if (dot) dot.style.display = total > 0 ? 'inline-block' : 'none';
+      } catch (_) {}
+    })();
+  </script>
+  <% } %>
 </body>
 </html>

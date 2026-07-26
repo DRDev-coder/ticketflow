@@ -158,12 +158,32 @@
               <button class="btn btn--sm ${p.isActive ? 'btn--danger' : 'btn--primary'}" onclick="toggleActive('${p._id}', ${!p.isActive})">
                 ${p.isActive ? 'Disable' : 'Enable'}
               </button>
+              <button class="btn btn--sm" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);" onclick="confirmDelete('${p._id}', '${escapeHtml(p.name).replace(/'/g,"\\'")}')">
+                Delete
+              </button>
             </div>
           </td>
         </tr>
       `;
     }).join('');
   }
+
+  async function confirmDelete(id, name) {
+    if (!confirm(`Delete problem "${name}"?\n\nAll inbox emails classified under this group will be moved to "Others". This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/admin/problems/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert(data.message || 'Problem deleted', 'success');
+        await loadProblems();
+      } else {
+        showAlert(data.error || 'Failed to delete', 'error');
+      }
+    } catch {
+      showAlert('Network error', 'error');
+    }
+  }
+
 
   function updateStats() {
     const active = problems.filter(p => p.isActive).length;

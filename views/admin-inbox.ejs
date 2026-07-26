@@ -1,0 +1,409 @@
+<div class="container" style="max-width: 100%; padding-top: var(--space-6);">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: var(--space-5);">
+    <div>
+      <h1 style="margin:0; font-size: var(--text-2xl);">Email Inbox</h1>
+      <p id="lastSyncLabel" style="margin: 4px 0 0; font-size: var(--text-sm); color: var(--color-muted);">Loading…</p>
+    </div>
+    <button id="syncBtn" class="btn btn--primary" style="display:flex; align-items:center; gap:6px;">
+      <svg id="syncIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+      Sync Now
+    </button>
+  </div>
+
+  <!-- Two-panel layout -->
+  <div style="display:grid; grid-template-columns: 260px 1fr; gap: var(--space-5); height: calc(100vh - 200px); min-height: 500px;">
+
+    <!-- ── LEFT SIDEBAR: Groups ── -->
+    <div style="
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    ">
+      <div style="padding: var(--space-4) var(--space-4) var(--space-2); font-size: var(--text-xs); color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; border-bottom: 1px solid var(--color-border);">
+        Groups
+      </div>
+      <div id="groupList" style="flex:1; overflow-y:auto;">
+        <div style="padding: var(--space-4); color: var(--color-muted); font-size: var(--text-sm);">Loading groups…</div>
+      </div>
+    </div>
+
+    <!-- ── RIGHT PANEL: Messages ── -->
+    <div style="
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    ">
+      <!-- Panel header -->
+      <div id="panelHeader" style="
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid var(--color-border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0;
+      ">
+        <span id="panelTitle" style="font-weight: 600; font-size: var(--text-base);">Select a group</span>
+        <button id="markAllReadBtn" onclick="markAllRead()" style="
+          display: none;
+          background: none;
+          border: 1px solid var(--color-border);
+          color: var(--color-muted);
+          padding: 4px 12px;
+          border-radius: var(--radius-sm);
+          font-size: var(--text-xs);
+          cursor: pointer;
+        ">Mark all read</button>
+      </div>
+
+      <!-- Message list -->
+      <div id="messageList" style="flex:1; overflow-y:auto; padding: var(--space-3);">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color: var(--color-muted);">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3; margin-bottom:12px;">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+          <p style="margin:0; font-size: var(--text-sm);">Select a group from the left to view emails</p>
+        </div>
+      </div>
+
+      <!-- Load more -->
+      <div id="loadMoreBar" style="display:none; padding: var(--space-3); border-top: 1px solid var(--color-border); text-align:center;">
+        <button id="loadMoreBtn" onclick="loadMoreMessages()" class="btn" style="font-size: var(--text-sm);">Load more</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Group item */
+  .group-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px var(--space-4);
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
+    font-size: var(--text-sm);
+  }
+  .group-item:hover { background: rgba(255,255,255,0.04); }
+  .group-item.active {
+    background: rgba(34,197,94,0.08);
+    border-left-color: var(--color-primary);
+  }
+  .group-item .group-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .unread-badge {
+    background: var(--color-primary);
+    color: #000;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+  }
+
+  /* Message card */
+  .msg-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-2);
+    transition: border-color 0.15s;
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .msg-card.unread { border-left: 3px solid var(--color-primary); }
+  .msg-card:hover { border-color: rgba(255,255,255,0.2); }
+  .msg-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+  .msg-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #22C55E, #16A34A);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: #000;
+    flex-shrink: 0;
+  }
+  .msg-meta { flex: 1; min-width: 0; }
+  .msg-sender { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-subject { font-size: 12px; color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-time { font-size: 11px; color: var(--color-muted); flex-shrink: 0; }
+  .msg-body {
+    display: none;
+    padding: 0 16px 14px 64px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #CBD5E1;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-top: 1px solid var(--color-border);
+    background: rgba(0,0,0,0.15);
+  }
+  .msg-body.open { display: block; }
+
+  /* Sync spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinning { animation: spin 0.8s linear infinite; }
+</style>
+
+<script>
+  // ─── State ───────────────────────────────────────────────────────────────────
+  let activeGroupId   = null;  // null = Others, string = problemId
+  let currentPage     = 1;
+  let totalMessages   = 0;
+  const PAGE_SIZE     = 30;
+
+  // ─── Format helpers ───────────────────────────────────────────────────────────
+  function timeAgo(dateStr) {
+    const d = new Date(dateStr);
+    const diff = Date.now() - d.getTime();
+    const mins  = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days  = Math.floor(diff / 86400000);
+    if (mins < 1)   return 'just now';
+    if (mins < 60)  return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7)   return `${days}d ago`;
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  }
+
+  function avatarLetter(from) {
+    return (from || '?').trim().charAt(0).toUpperCase();
+  }
+
+  // ─── Load groups (sidebar) ────────────────────────────────────────────────────
+  async function loadGroups() {
+    try {
+      const res  = await fetch('/api/admin/inbox/groups');
+      const data = await res.json();
+
+      // Update last-sync label
+      const label = document.getElementById('lastSyncLabel');
+      if (data.lastSyncedAt) {
+        label.textContent = `Last synced ${timeAgo(data.lastSyncedAt)}`;
+      } else {
+        label.textContent = 'Not synced yet — click Sync Now';
+      }
+
+      // Render group list
+      const list = document.getElementById('groupList');
+      if (!data.groups || data.groups.length === 0) {
+        list.innerHTML = '<div style="padding:16px; font-size:13px; color:var(--color-muted);">No groups yet. Create a problem category first.</div>';
+        return;
+      }
+
+      list.innerHTML = data.groups.map(g => {
+        const gid   = g._id ? String(g._id) : 'null';
+        const badge = g.unread > 0
+          ? `<span class="unread-badge">${g.unread}</span>`
+          : `<span style="font-size:11px; color:var(--color-muted);">${g.total}</span>`;
+        const isOthersStyle = g.isOthers ? 'color:var(--color-muted); font-style:italic;' : '';
+        const activeClass   = gid === String(activeGroupId) ? 'active' : '';
+        return `
+          <div class="group-item ${activeClass}" onclick="selectGroup('${gid}', '${escHtml(g.name)}')" data-gid="${gid}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.5; flex-shrink:0;">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+            <span class="group-name" style="${isOthersStyle}">${escHtml(g.name)}</span>
+            ${badge}
+          </div>`;
+      }).join('');
+
+      // Update nav unread dot
+      const totalUnread = data.groups.reduce((s, g) => s + g.unread, 0);
+      const dot = document.getElementById('inboxUnreadDot');
+      if (dot) dot.style.display = totalUnread > 0 ? 'inline-block' : 'none';
+
+    } catch (err) {
+      document.getElementById('groupList').innerHTML =
+        '<div style="padding:16px; font-size:13px; color:#f87171;">Failed to load groups.</div>';
+    }
+  }
+
+  // ─── Select a group ───────────────────────────────────────────────────────────
+  function selectGroup(gid, name) {
+    activeGroupId = gid === 'null' ? null : gid;
+    currentPage   = 1;
+    totalMessages = 0;
+
+    // Highlight active group
+    document.querySelectorAll('.group-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.gid === gid);
+    });
+
+    document.getElementById('panelTitle').textContent  = name;
+    document.getElementById('markAllReadBtn').style.display = 'inline-block';
+    document.getElementById('messageList').innerHTML =
+      '<div style="padding:2rem; text-align:center; color:var(--color-muted); font-size:13px;">Loading…</div>';
+    document.getElementById('loadMoreBar').style.display = 'none';
+
+    loadMessages(false);
+  }
+
+  // ─── Load messages ────────────────────────────────────────────────────────────
+  async function loadMessages(append = false) {
+    const pid = activeGroupId === null ? 'null' : activeGroupId;
+    try {
+      const res  = await fetch(`/api/admin/inbox/messages?problemId=${pid}&page=${currentPage}&limit=${PAGE_SIZE}`);
+      const data = await res.json();
+      totalMessages = data.total;
+
+      const list = document.getElementById('messageList');
+
+      if (!append) {
+        if (!data.messages || data.messages.length === 0) {
+          list.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--color-muted); padding:2rem; text-align:center;">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3; margin-bottom:10px;">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+              <p style="margin:0; font-size:13px;">No emails in this group yet.</p>
+              <p style="margin:6px 0 0; font-size:12px; color:var(--color-muted);">Emails will appear here after the next sync.</p>
+            </div>`;
+          document.getElementById('loadMoreBar').style.display = 'none';
+          return;
+        }
+        list.innerHTML = '';
+      }
+
+      data.messages.forEach(msg => {
+        list.insertAdjacentHTML('beforeend', renderMessage(msg));
+      });
+
+      // Show/hide load-more
+      const shown = (currentPage - 1) * PAGE_SIZE + data.messages.length;
+      const loadMoreBar = document.getElementById('loadMoreBar');
+      loadMoreBar.style.display = shown < totalMessages ? 'block' : 'none';
+
+    } catch (err) {
+      document.getElementById('messageList').innerHTML =
+        '<div style="padding:2rem; text-align:center; color:#f87171; font-size:13px;">Failed to load messages.</div>';
+    }
+  }
+
+  function loadMoreMessages() {
+    currentPage++;
+    loadMessages(true);
+  }
+
+  // ─── Render a single message card ─────────────────────────────────────────────
+  function renderMessage(msg) {
+    const unreadClass = msg.isRead ? '' : 'unread';
+    const bodyPreview = (msg.bodyText || '').substring(0, 120).replace(/\n/g, ' ');
+    const fullBody    = escHtml(msg.bodyText || '(empty)');
+    return `
+      <div class="msg-card ${unreadClass}" id="msg-${msg._id}" onclick="toggleMessage('${msg._id}', '${escJs(msg._id)}')">
+        <div class="msg-header">
+          <div class="msg-avatar">${avatarLetter(msg.from)}</div>
+          <div class="msg-meta">
+            <div class="msg-sender">${escHtml(msg.from || msg.fromEmail || 'Unknown')}</div>
+            <div class="msg-subject">${escHtml(msg.subject)}</div>
+            <div style="font-size:11px; color:var(--color-muted); margin-top:2px;">${escHtml(bodyPreview)}…</div>
+          </div>
+          <div class="msg-time">${timeAgo(msg.receivedAt)}</div>
+        </div>
+        <div class="msg-body" id="body-${msg._id}">
+          <div style="margin-bottom:8px; font-size:11px; color:var(--color-muted); border-bottom:1px solid var(--color-border); padding-bottom:6px;">
+            From: ${escHtml(msg.from || msg.fromEmail)} &nbsp;|&nbsp; ${new Date(msg.receivedAt).toLocaleString('en-IN', { dateStyle:'medium', timeStyle:'short', timeZone:'Asia/Kolkata' })}
+          </div>
+          ${fullBody}
+        </div>
+      </div>`;
+  }
+
+  // ─── Toggle expand / mark read ────────────────────────────────────────────────
+  function toggleMessage(msgId, rawId) {
+    const card = document.getElementById(`msg-${msgId}`);
+    const body = document.getElementById(`body-${msgId}`);
+    body.classList.toggle('open');
+
+    // Mark as read on open
+    if (body.classList.contains('open') && card.classList.contains('unread')) {
+      card.classList.remove('unread');
+      fetch(`/api/admin/inbox/messages/${msgId}/read`, { method: 'PATCH' });
+      loadGroups(); // refresh unread counts
+    }
+  }
+
+  // ─── Mark all read ────────────────────────────────────────────────────────────
+  async function markAllRead() {
+    const pid = activeGroupId === null ? 'null' : (activeGroupId || 'null');
+    try {
+      await fetch(`/api/admin/inbox/groups/read-all?problemId=${pid}`, { method: 'PATCH' });
+      document.querySelectorAll('.msg-card.unread').forEach(el => el.classList.remove('unread'));
+      loadGroups();
+      showAlert('All messages marked as read', 'success');
+    } catch {
+      showAlert('Failed to mark as read', 'error');
+    }
+  }
+
+  // ─── Sync button ─────────────────────────────────────────────────────────────
+  document.getElementById('syncBtn').addEventListener('click', async () => {
+    const btn  = document.getElementById('syncBtn');
+    const icon = document.getElementById('syncIcon');
+    btn.disabled = true;
+    icon.classList.add('spinning');
+    btn.querySelector('svg').nextSibling.textContent = ' Syncing…';
+
+    try {
+      const res  = await fetch('/api/admin/inbox/sync', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert(`Sync complete: ${data.newEmails} new email(s)`, 'success');
+        await loadGroups();
+        if (activeGroupId !== null || activeGroupId === null) {
+          currentPage = 1;
+          loadMessages(false);
+        }
+      } else {
+        showAlert(data.error || 'Sync failed', 'error');
+      }
+    } catch {
+      showAlert('Network error during sync', 'error');
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove('spinning');
+      btn.querySelector('svg').nextSibling.textContent = ' Sync Now';
+    }
+  });
+
+  // ─── Escape helpers ───────────────────────────────────────────────────────────
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escJs(str) { return String(str || '').replace(/'/g, "\\'"); }
+
+  // ─── Init ─────────────────────────────────────────────────────────────────────
+  loadGroups();
+  // Refresh groups every 2 minutes in the background
+  setInterval(loadGroups, 120_000);
+</script>

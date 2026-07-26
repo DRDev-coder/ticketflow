@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
+const cron = require('node-cron');
 const expressLayouts = require('express-ejs-layouts');
 const connectDB = require('./config/db');
 const seedProblems = require('./config/seed');
@@ -32,16 +33,18 @@ app.use((req, res, next) => {
 });
 
 // --- API Routes ---
-const authRoutes = require('./routes/auth');
-const adminRoutes = require('./routes/admin');
-const ticketRoutes = require('./routes/tickets');
-const cronRoutes = require('./routes/cron');
+const authRoutes    = require('./routes/auth');
+const adminRoutes   = require('./routes/admin');
+const ticketRoutes  = require('./routes/tickets');
+const cronRoutes    = require('./routes/cron');
 const telegramRoutes = require('./routes/telegram');
+const inboxRoutes   = require('./routes/inbox');
 app.use(authRoutes);
 app.use(adminRoutes);
 app.use(ticketRoutes);
 app.use(cronRoutes);
 app.use(telegramRoutes);
+app.use(inboxRoutes);
 
 // --- Page Routes ---
 
@@ -65,7 +68,6 @@ app.get('/signup', (req, res) => {
 });
 
 app.get('/verify-otp', (req, res) => {
-  // If already logged in, no need to verify
   if (req.user && req.user.role !== 'admin') return res.redirect('/my-tickets');
   const email = req.query.email || '';
   res.render('verify-otp', { title: 'Verify Email', email });
@@ -94,6 +96,10 @@ app.get('/admin/problems', requireAdmin, (req, res) => {
   res.render('admin-problems', { title: 'Problem Management' });
 });
 
+app.get('/admin/inbox', requireAdmin, (req, res) => {
+  res.render('admin-inbox', { title: 'Email Inbox' });
+});
+
 // --- 404 Handler ---
 app.use((req, res) => {
   res.status(404).render('login', { title: 'Page Not Found' });
@@ -118,6 +124,24 @@ const startServer = async () => {
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Telegram mode: ${process.env.TELEGRAM_MODE || 'polling'}\n`);
   });
+
+  // --- Inbox sync: run once on startup, then every 5 minutes ---
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD && process.env.GEMINI_API_KEY) {
+    const { runSync } = require('./controllers/inboxController');
+
+    // Initial sync after 5 s (let the server fully start first)
+    setTimeout(() => {
+      runSync().catch(err => console.error('Startup inbox sync failed:', err.message));
+    }, 5000);
+
+    // Every 5 minutes
+    cron.schedule('*/5 * * * *', () => {
+      runSync().catch(err => console.error('Cron inbox sync failed:', err.message));
+    });
+    console.log('📬 Inbox sync scheduled (every 5 minutes)');
+  } else {
+    console.warn('⚠️  Inbox sync disabled — GMAIL_USER, GMAIL_APP_PASSWORD, or GEMINI_API_KEY not set');
+  }
 };
 
 startServer();
