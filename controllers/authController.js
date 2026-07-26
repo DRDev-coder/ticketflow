@@ -1,40 +1,77 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { SESSION_DURATION_MS, SESSION_DURATION_SECONDS } = require('../config/session');
 
+/**
+ * Password strength rules — single definition reused by the signup handler.
+ * Each rule: { regex, label } where label describes what's missing.
+ * These mirror the PASSWORD_RULES array in signup.ejs exactly.
+ */
+const PASSWORD_RULES = [
+  { regex: /.{8,}/,        label: 'at least 8 characters' },
+  { regex: /[A-Z]/,        label: 'at least one uppercase letter' },
+  { regex: /[a-z]/,        label: 'at least one lowercase letter' },
+  { regex: /[0-9]/,        label: 'at least one number' },
+  { regex: /[^A-Za-z0-9]/, label: 'at least one special character (!@#$%^&* etc.)' }
+];
+
+/** Returns an array of failing rule labels, or [] if all rules pass. */
+const getPasswordFailures = (password) =>
+  PASSWORD_RULES.filter(r => !r.regex.test(password)).map(r => r.label);
+
+/**
+ * Cookie options shared by both user login and admin login.
+ * maxAge is driven by the shared SESSION_DURATION_MS constant.
+ */
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  maxAge: SESSION_DURATION_MS
 };
 
 /**
  * Generate a JWT token for a given payload.
+ * expiresIn is driven by the shared SESSION_DURATION_SECONDS constant
+ * so the token's own expiry claim always matches the cookie maxAge.
  */
 const generateToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: SESSION_DURATION_SECONDS });
 };
 
 /**
  * POST /api/auth/signup
  * Register a new user account.
+ * Does NOT issue a session — redirects to /login?signup=success instead.
  */
 const signup = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, confirmPassword } = req.body;
 
-    // Validation
-    if (!name || !email || !password) {
+    // 1. Presence check
+    if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({ error: 'All fields are required' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    // 2. Confirm-password match (server re-validates — never trust client only)
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match.' });
     }
 
-    // Check if email already exists
+    // 3. Password strength (names exactly which rules are failing)
+    const failures = getPasswordFailures(password);
+    if (failures.length > 0) {
+      return res.status(400).json({
+        error: 'Password must include ' + failures.join(', ') + '.'
+      });
+    }
+
+    // 4. Duplicate email — checked explicitly before save so the error message
+    //    is always friendly. The err.code === 11000 catch below is a safety net
+    //    for the rare race-condition case.
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      return res.status(400).json({ error: 'An account with this email already exists' });
+      return res.status(400).json({ error: 'An account with this email already exists.' });
     }
 
     // Create user (password is hashed via pre-save hook)
@@ -45,18 +82,10 @@ const signup = async (req, res) => {
     });
     await user.save();
 
-    // Issue JWT
-    const token = generateToken({
-      id: user._id,
-      email: user.email,
-      name: user.name,
-      role: 'user'
-    });
-    res.cookie('token', token, COOKIE_OPTIONS);
-
+    // Do NOT issue a JWT or set a cookie — the user must log in explicitly.
     res.status(201).json({
       message: 'Account created successfully',
-      user: user.toJSON()
+      redirectTo: '/login?signup=success'
     });
   } catch (err) {
     console.error('Signup error:', err);
