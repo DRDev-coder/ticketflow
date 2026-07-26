@@ -1,0 +1,225 @@
+<div class="auth-page">
+  <div class="auth-card">
+    <div class="card card--elevated">
+      <div class="card__header">
+        <h1>Verify your email</h1>
+        <p>
+          We sent a 6-digit code to
+          <strong id="displayEmail" style="color: var(--color-primary);"><%= email %></strong>.
+          Enter it below — it expires in 10 minutes.
+        </p>
+      </div>
+
+      <!-- OTP digit boxes -->
+      <div id="otpRow" style="display:flex; gap:10px; justify-content:center; margin: 8px 0 24px;">
+        <% for (let i = 0; i < 6; i++) { %>
+          <input
+            type="text"
+            inputmode="numeric"
+            maxlength="1"
+            class="otp-box form-control"
+            id="otp-<%= i %>"
+            autocomplete="off"
+            style="
+              width: 48px; height: 56px;
+              text-align: center;
+              font-size: 24px;
+              font-family: monospace;
+              font-weight: 700;
+              padding: 0;
+              border-radius: 8px;
+              letter-spacing: 0;
+            "
+          >
+        <% } %>
+      </div>
+
+      <!-- Error / info messages inline -->
+      <div id="otpError" style="display:none; margin-bottom:14px; color:#f87171; font-size:13px; text-align:center;"></div>
+      <div id="otpSuccess" style="display:none; margin-bottom:14px; color:#4ade80; font-size:13px; text-align:center;"></div>
+
+      <button
+        id="verifyBtn"
+        class="btn btn--primary btn--block btn--lg"
+        style="margin-bottom: 16px;"
+      >
+        Verify &amp; Activate
+      </button>
+
+      <div style="text-align:center; font-size:13px; color: var(--color-muted);">
+        Didn't receive the code?
+        <button
+          id="resendBtn"
+          type="button"
+          style="
+            background: none; border: none; padding: 0;
+            color: var(--color-primary); font-size: 13px;
+            cursor: pointer; text-decoration: underline;
+          "
+        >
+          Resend
+        </button>
+        <span id="resendCountdown" style="display:none;"></span>
+      </div>
+    </div>
+
+    <div class="auth-footer">
+      Wrong email? <a href="/signup">Go back to sign up</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── State ───────────────────────────────────────────────────────────────────
+  // Email comes from the URL query string (set by signup redirect).
+  // Also available server-side as `email` template variable (pre-rendered above).
+  const emailForVerification = new URLSearchParams(window.location.search).get('email')
+    || document.getElementById('displayEmail').textContent.trim();
+
+  const boxes     = Array.from(document.querySelectorAll('.otp-box'));
+  const verifyBtn = document.getElementById('verifyBtn');
+  const resendBtn = document.getElementById('resendBtn');
+  const errorEl   = document.getElementById('otpError');
+  const successEl = document.getElementById('otpSuccess');
+
+  function showError(msg)   { errorEl.textContent = msg; errorEl.style.display = 'block'; successEl.style.display = 'none'; }
+  function showSuccess(msg) { successEl.textContent = msg; successEl.style.display = 'block'; errorEl.style.display = 'none'; }
+  function clearMessages()  { errorEl.style.display = 'none'; successEl.style.display = 'none'; }
+
+  // ─── OTP box keyboard handling ────────────────────────────────────────────────
+  boxes.forEach((box, idx) => {
+    box.addEventListener('keydown', (e) => {
+      // Backspace on empty box — move to previous
+      if (e.key === 'Backspace' && !box.value && idx > 0) {
+        boxes[idx - 1].focus();
+        boxes[idx - 1].value = '';
+      }
+    });
+
+    box.addEventListener('input', (e) => {
+      // Strip non-digits
+      box.value = box.value.replace(/\D/g, '').slice(-1);
+      clearMessages();
+      // Auto-advance
+      if (box.value && idx < 5) {
+        boxes[idx + 1].focus();
+      }
+      // If last box filled — auto-submit
+      if (idx === 5 && box.value) {
+        const allFilled = boxes.every(b => b.value.length === 1);
+        if (allFilled) submitOtp();
+      }
+    });
+
+    // Handle paste anywhere in the row: distribute digits across boxes
+    box.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const pasted = (e.clipboardData || window.clipboardData)
+        .getData('text')
+        .replace(/\D/g, '')
+        .slice(0, 6);
+      pasted.split('').forEach((ch, i) => {
+        if (boxes[i]) boxes[i].value = ch;
+      });
+      const nextEmpty = boxes.findIndex(b => !b.value);
+      (nextEmpty === -1 ? boxes[5] : boxes[nextEmpty]).focus();
+      clearMessages();
+      if (pasted.length === 6) submitOtp();
+    });
+  });
+
+  // Focus first box on load
+  boxes[0].focus();
+
+  // ─── Submit ──────────────────────────────────────────────────────────────────
+  async function submitOtp() {
+    const otp = boxes.map(b => b.value).join('');
+    if (otp.length < 6) {
+      showError('Please enter all 6 digits.');
+      return;
+    }
+
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying…';
+    clearMessages();
+
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: emailForVerification, otp })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        showSuccess(data.message || 'Email verified! Redirecting…');
+        setTimeout(() => {
+          window.location.href = data.redirectTo || '/login?signup=success';
+        }, 900);
+      } else {
+        showError(data.error || 'Verification failed. Try again.');
+        // Clear boxes on wrong code so user can re-type
+        if (data.error && data.error.toLowerCase().includes('incorrect')) {
+          boxes.forEach(b => b.value = '');
+          boxes[0].focus();
+        }
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify & Activate';
+      }
+    } catch {
+      showError('Network error. Please try again.');
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify & Activate';
+    }
+  }
+
+  verifyBtn.addEventListener('click', submitOtp);
+
+  // ─── Resend with 30-second cooldown ──────────────────────────────────────────
+  let resendTimer = null;
+
+  function startResendCooldown() {
+    resendBtn.disabled = true;
+    resendBtn.style.opacity = '0.4';
+    const countdown = document.getElementById('resendCountdown');
+    countdown.style.display = 'inline';
+    let secs = 30;
+    countdown.textContent = ` (${secs}s)`;
+    resendTimer = setInterval(() => {
+      secs--;
+      if (secs <= 0) {
+        clearInterval(resendTimer);
+        resendBtn.disabled = false;
+        resendBtn.style.opacity = '1';
+        countdown.style.display = 'none';
+      } else {
+        countdown.textContent = ` (${secs}s)`;
+      }
+    }, 1000);
+  }
+
+  resendBtn.addEventListener('click', async () => {
+    clearMessages();
+    resendBtn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/resend-otp', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: emailForVerification })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showSuccess(data.message || 'New code sent!');
+        boxes.forEach(b => b.value = '');
+        boxes[0].focus();
+        startResendCooldown();
+      } else {
+        showError(data.error || 'Could not resend code.');
+        resendBtn.disabled = false;
+      }
+    } catch {
+      showError('Network error. Please try again.');
+      resendBtn.disabled = false;
+    }
+  });
+</script>

@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
+const { sendOtpEmail } = require('../config/mailer');
 const { SESSION_DURATION_MS, SESSION_DURATION_SECONDS } = require('../config/session');
 
 /**
@@ -18,6 +20,13 @@ const PASSWORD_RULES = [
 /** Returns an array of failing rule labels, or [] if all rules pass. */
 const getPasswordFailures = (password) =>
   PASSWORD_RULES.filter(r => !r.regex.test(password)).map(r => r.label);
+
+/** Generate a cryptographically random 6-digit OTP string. */
+const generateOtp = () =>
+  String(crypto.randomInt(100000, 999999)); // always 6 digits
+
+/** OTP validity window: 10 minutes */
+const OTP_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Cookie options shared by both user login and admin login.
@@ -41,8 +50,8 @@ const generateToken = (payload) => {
 
 /**
  * POST /api/auth/signup
- * Register a new user account.
- * Does NOT issue a session — redirects to /login?signup=success instead.
+ * Validate input, create an unverified account, send OTP to email.
+ * Does NOT issue a session — user must verify OTP first, then log in.
  */
 const signup = async (req, res) => {
   try {
@@ -66,39 +75,156 @@ const signup = async (req, res) => {
       });
     }
 
-    // 4. Duplicate email — checked explicitly before save so the error message
-    //    is always friendly. The err.code === 11000 catch below is a safety net
-    //    for the rare race-condition case.
+    // 4. Duplicate email check
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      return res.status(400).json({ error: 'An account with this email already exists.' });
+      if (existingUser.isVerified) {
+        return res.status(400).json({ error: 'An account with this email already exists.' });
+      }
+      // Unverified duplicate: re-send a fresh OTP instead of rejecting
+      const otp = generateOtp();
+      existingUser.otp       = otp;
+      existingUser.otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+      await existingUser.save();
+      await sendOtpEmail(existingUser.email, otp);
+      console.log(`📧 Resent OTP to existing unverified account: ${existingUser.email}`);
+      return res.status(200).json({
+        message: 'A new verification code has been sent to your email.',
+        redirectTo: `/verify-otp?email=${encodeURIComponent(existingUser.email)}`
+      });
     }
 
-    // Create user (password is hashed via pre-save hook)
+    // 5. Create unverified user
+    const otp = generateOtp();
     const user = new User({
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
-      passwordHash: password
+      name:          name.trim(),
+      email:         email.toLowerCase().trim(),
+      passwordHash:  password,       // hashed by pre-save hook
+      isVerified:    false,
+      otp,
+      otpExpiry:     new Date(Date.now() + OTP_TTL_MS)
     });
     await user.save();
 
-    // Do NOT issue a JWT or set a cookie — the user must log in explicitly.
+    // 6. Send OTP email (if this fails, delete the user so they can retry cleanly)
+    try {
+      await sendOtpEmail(user.email, otp);
+      console.log(`📧 OTP sent to ${user.email}`);
+    } catch (mailErr) {
+      console.error('Failed to send OTP email — rolling back user creation:', mailErr.message);
+      await User.deleteOne({ _id: user._id });
+      return res.status(500).json({ error: 'Could not send verification email. Please try again.' });
+    }
+
     res.status(201).json({
-      message: 'Account created successfully',
-      redirectTo: '/login?signup=success'
+      message: 'Account created! Check your email for the 6-digit verification code.',
+      redirectTo: `/verify-otp?email=${encodeURIComponent(user.email)}`
     });
   } catch (err) {
     console.error('Signup error:', err);
     if (err.code === 11000) {
-      return res.status(400).json({ error: 'An account with this email already exists' });
+      return res.status(400).json({ error: 'An account with this email already exists.' });
     }
     res.status(500).json({ error: 'Server error. Please try again.' });
   }
 };
 
 /**
+ * POST /api/auth/verify-otp
+ * Validate the 6-digit OTP entered by the user.
+ * Activates the account on success.
+ */
+const verifyOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ error: 'Email and code are required.' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(400).json({ error: 'No account found for this email.' });
+    }
+
+    if (user.isVerified) {
+      // Already verified — just let them log in
+      return res.status(200).json({
+        message: 'Email already verified. Please sign in.',
+        redirectTo: '/login'
+      });
+    }
+
+    // Check expiry first (give a clearer message)
+    if (!user.otpExpiry || new Date() > user.otpExpiry) {
+      return res.status(400).json({
+        error: 'This code has expired. Request a new one below.'
+      });
+    }
+
+    // Check match
+    if (user.otp !== String(otp).trim()) {
+      return res.status(400).json({ error: 'Incorrect code. Please try again.' });
+    }
+
+    // Activate account and clear OTP fields
+    user.isVerified = true;
+    user.otp        = null;
+    user.otpExpiry  = null;
+    await user.save();
+
+    console.log(`✅ Email verified for ${user.email}`);
+
+    res.status(200).json({
+      message: 'Email verified! You can now sign in.',
+      redirectTo: '/login?signup=success'
+    });
+  } catch (err) {
+    console.error('OTP verification error:', err);
+    res.status(500).json({ error: 'Server error. Please try again.' });
+  }
+};
+
+/**
+ * POST /api/auth/resend-otp
+ * Regenerate and resend the OTP for an unverified account.
+ * We do NOT reveal whether the email exists (security), but practically
+ * this is an internal system so we give clear feedback.
+ */
+const resendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required.' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(400).json({ error: 'No account found for this email.' });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({ error: 'This account is already verified. Please sign in.' });
+    }
+
+    const otp = generateOtp();
+    user.otp       = otp;
+    user.otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+    await user.save();
+
+    await sendOtpEmail(user.email, otp);
+    console.log(`📧 OTP resent to ${user.email}`);
+
+    res.status(200).json({ message: 'A new code has been sent to your email.' });
+  } catch (err) {
+    console.error('Resend OTP error:', err);
+    res.status(500).json({ error: 'Server error. Please try again.' });
+  }
+};
+
+/**
  * POST /api/auth/login
- * Log in an existing user.
+ * Log in an existing, verified user.
  */
 const login = async (req, res) => {
   try {
@@ -113,16 +239,24 @@ const login = async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Block unverified accounts before checking the password
+    if (!user.isVerified) {
+      return res.status(403).json({
+        error: 'Please verify your email first.',
+        redirectTo: `/verify-otp?email=${encodeURIComponent(user.email)}`
+      });
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     const token = generateToken({
-      id: user._id,
+      id:    user._id,
       email: user.email,
-      name: user.name,
-      role: 'user'
+      name:  user.name,
+      role:  'user'
     });
     res.cookie('token', token, COOKIE_OPTIONS);
 
@@ -156,10 +290,10 @@ const adminLogin = async (req, res) => {
     }
 
     const token = generateToken({
-      id: 'admin',
+      id:    'admin',
       email: process.env.ADMIN_EMAIL,
-      name: 'Admin',
-      role: 'admin'
+      name:  'Admin',
+      role:  'admin'
     });
     res.cookie('token', token, COOKIE_OPTIONS);
 
@@ -179,4 +313,4 @@ const logout = (req, res) => {
   res.json({ message: 'Logged out successfully' });
 };
 
-module.exports = { signup, login, adminLogin, logout };
+module.exports = { signup, verifyOtp, resendOtp, login, adminLogin, logout };

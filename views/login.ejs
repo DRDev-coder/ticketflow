@@ -5,6 +5,12 @@
         <h1>Welcome Back</h1>
         <p>Sign in to your account to continue</p>
       </div>
+      <% if (typeof signupSuccess !== 'undefined' && signupSuccess) { %>
+        <div class="alert alert--success" style="margin-bottom: 1rem;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span>Account created — please sign in with your new credentials.</span>
+        </div>
+      <% } %>
       <form id="loginForm">
         <div class="form-group">
           <label for="email">Email Address</label>
@@ -46,13 +52,43 @@
     e.preventDefault();
     const btn = document.getElementById('loginBtn');
     const data = {
-      email: document.getElementById('email').value,
+      email:    document.getElementById('email').value,
       password: document.getElementById('password').value
     };
-    await submitForm('/api/auth/login', data, {
-      button: btn,
-      redirectTo: '/my-tickets',
-      successMessage: 'Logged in successfully!'
-    });
+
+    // Use raw fetch so we can inspect the status code before submitForm handles it.
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+
+    try {
+      const res  = await fetch('/api/auth/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(data)
+      });
+      const json = await res.json();
+
+      if (res.status === 403 && json.redirectTo) {
+        // Account exists but email not yet verified — send them to verify-otp
+        showAlert('Please verify your email first. Redirecting…', 'warning');
+        setTimeout(() => { window.location.href = json.redirectTo; }, 1200);
+        return;
+      }
+
+      if (!res.ok) {
+        showAlert(json.error || 'Login failed. Please try again.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        return;
+      }
+
+      // Success
+      showAlert('Logged in successfully!', 'success');
+      setTimeout(() => { window.location.href = '/my-tickets'; }, 600);
+    } catch {
+      showAlert('Network error. Please try again.', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
   });
 </script>

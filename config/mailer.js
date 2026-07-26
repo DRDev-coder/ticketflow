@@ -110,6 +110,42 @@ const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, 
 };
 
 /**
+ * Send a 6-digit OTP email for signup verification.
+ * @param {string} to   - Recipient email
+ * @param {string} otp  - The 6-digit code
+ */
+const sendOtpEmail = async (to, otp) => {
+  const htmlContent = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; background: #0F172A; color: #F8FAFC; border-radius: 12px; overflow: hidden;">
+      <div style="background: linear-gradient(135deg, #1E293B, #0F172A); padding: 24px 32px; border-bottom: 1px solid #334155;">
+        <h1 style="margin: 0; font-size: 20px; color: #22C55E;">🔐 Verify your email</h1>
+      </div>
+      <div style="padding: 32px; text-align: center;">
+        <p style="margin: 0 0 24px; color: #94A3B8; font-size: 14px; line-height: 1.6;">
+          Enter this code on the verification page to activate your TicketFlow account.
+          It expires in <strong style="color: #F8FAFC;">10 minutes</strong>.
+        </p>
+        <div style="display: inline-block; background: #1E293B; border: 2px solid #334155; border-radius: 12px; padding: 20px 36px;">
+          <span style="font-family: monospace; font-size: 42px; font-weight: 700; letter-spacing: 12px; color: #22C55E;">${otp}</span>
+        </div>
+        <p style="margin: 24px 0 0; color: #64748B; font-size: 12px;">
+          If you didn't request this, you can safely ignore this email.
+        </p>
+      </div>
+      <div style="padding: 16px 32px; background: #1E293B; border-top: 1px solid #334155; text-align: center;">
+        <p style="margin: 0; font-size: 12px; color: #64748B;">TicketFlow — Internal Ticket Routing System</p>
+      </div>
+    </div>
+  `;
+
+  await sendViaBrevo({
+    to,
+    subject: `${otp} — your TicketFlow verification code`,
+    htmlContent
+  });
+};
+
+/**
  * Verify Brevo configuration on startup (checks the API key is present and
  * that the API responds — does not send a real email).
  */
@@ -138,4 +174,4 @@ const verifyMailer = async () => {
   }
 };
 
-module.exports = { sendTicketEmail, verifyMailer };
+module.exports = { sendTicketEmail, sendOtpEmail, verifyMailer };

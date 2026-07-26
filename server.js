@@ -56,12 +56,19 @@ app.get('/', (req, res) => {
 
 app.get('/login', (req, res) => {
   if (req.user && req.user.role !== 'admin') return res.redirect('/my-tickets');
-  res.render('login', { title: 'Login' });
+  res.render('login', { title: 'Login', signupSuccess: req.query.signup === 'success' });
 });
 
 app.get('/signup', (req, res) => {
   if (req.user && req.user.role !== 'admin') return res.redirect('/my-tickets');
   res.render('signup', { title: 'Sign Up' });
+});
+
+app.get('/verify-otp', (req, res) => {
+  // If already logged in, no need to verify
+  if (req.user && req.user.role !== 'admin') return res.redirect('/my-tickets');
+  const email = req.query.email || '';
+  res.render('verify-otp', { title: 'Verify Email', email });
 });
 
 app.get('/admin/login', (req, res) => {

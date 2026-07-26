@@ -146,11 +146,12 @@
 
     const result = await submitForm('/api/auth/signup', data, {
       button: btn,
-      successMessage: 'Account created! Redirecting to login...'
+      successMessage: 'Account created! Check your email for the verification code…'
     });
     if (result) {
       setTimeout(() => {
-        window.location.href = result.redirectTo || '/login?signup=success';
+        // Server tells us exactly where to go (includes the email in the URL)
+        window.location.href = result.redirectTo || '/verify-otp';
       }, 800);
     }
   });
