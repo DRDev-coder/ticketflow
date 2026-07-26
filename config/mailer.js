@@ -1,13 +1,50 @@
-const nodemailer = require('nodemailer');
+/**
+ * mailer.js — Brevo transactional email API (HTTP, no SMTP).
+ *
+ * Render (free tier) permanently blocks outbound SMTP ports 25/465/587, so
+ * Nodemailer+Gmail cannot work there. Brevo's REST API sends email over
+ * standard HTTPS (port 443), which is always allowed.
+ *
+ * Required env var: BREVO_API_KEY
+ * Verified sender in Brevo: darshan5154896@gmail.com
+ */
 
-// Create reusable transporter with Gmail SMTP
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const FROM_EMAIL = 'darshan5154896@gmail.com';
+const FROM_NAME = 'TicketFlow';
+
+/**
+ * Low-level helper — POST a single email via Brevo's transactional API.
+ * Throws if the API returns a non-2xx status.
+ */
+const sendViaBrevo = async ({ to, subject, htmlContent }) => {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    throw new Error('BREVO_API_KEY is not set in environment');
   }
-});
+
+  const body = {
+    sender: { name: FROM_NAME, email: FROM_EMAIL },
+    to: [{ email: to }],
+    subject,
+    htmlContent
+  };
+
+  const response = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '(no body)');
+    throw new Error(`Brevo API error ${response.status}: ${detail}`);
+  }
+};
 
 /**
  * Send a ticket notification email.
@@ -19,8 +56,8 @@ const transporter = nodemailer.createTransport({
  * @param {string} options.problemName - Problem category name
  * @param {string} options.description - Ticket description
  * @param {string} options.ticketId - Ticket ID
- * @param {Date} options.createdAt - Ticket creation timestamp
- * @param {string} [options.routedTo] - If set, renders a "Routed To" row in the email (used for admin copy)
+ * @param {Date}   options.createdAt - Ticket creation timestamp
+ * @param {string} [options.routedTo] - If set, renders a "Routed To" row (used for admin copy)
  */
 const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, description, ticketId, createdAt, routedTo }) => {
   const timestamp = new Date(createdAt).toLocaleString('en-IN', {
@@ -29,7 +66,7 @@ const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, 
     timeZone: 'Asia/Kolkata'
   });
 
-  const html = `
+  const htmlContent = `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0F172A; color: #F8FAFC; border-radius: 12px; overflow: hidden;">
       <div style="background: linear-gradient(135deg, #1E293B, #0F172A); padding: 24px 32px; border-bottom: 1px solid #334155;">
         <h1 style="margin: 0; font-size: 20px; color: #22C55E;">🎫 New Ticket Raised</h1>
@@ -69,26 +106,35 @@ const sendTicketEmail = async ({ to, subject, userName, userEmail, problemName, 
     </div>
   `;
 
-  const mailOptions = {
-    from: `"TicketFlow" <${process.env.SMTP_USER}>`,
-    to,
-    subject,
-    html
-  };
-
-  await transporter.sendMail(mailOptions);
+  await sendViaBrevo({ to, subject, htmlContent });
 };
 
 /**
- * Verify SMTP connection on startup.
+ * Verify Brevo configuration on startup (checks the API key is present and
+ * that the API responds — does not send a real email).
  */
 const verifyMailer = async () => {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    console.error('❌ Email transporter error: BREVO_API_KEY is not set in .env');
+    console.error('   Add BREVO_API_KEY to your environment and redeploy.');
+    return;
+  }
+
+  // Lightweight check: hit the account endpoint to confirm the key is valid.
   try {
-    await transporter.verify();
-    console.log('✅ Email transporter ready (Gmail SMTP)');
+    const res = await fetch('https://api.brevo.com/v3/account', {
+      headers: { 'api-key': apiKey, 'accept': 'application/json' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      console.log(`✅ Email transporter ready (Brevo API — plan: ${data.plan?.[0]?.type ?? 'unknown'})`);
+    } else {
+      const detail = await res.text().catch(() => '');
+      console.error(`❌ Email transporter error: Brevo API key rejected (${res.status}) — ${detail}`);
+    }
   } catch (err) {
     console.error('❌ Email transporter error:', err.message);
-    console.error('   Check SMTP_USER and SMTP_PASS in .env');
   }
 };
 

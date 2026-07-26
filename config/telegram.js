@@ -38,9 +38,23 @@ const initTelegramBot = () => {
     bot = new TelegramBot(token, { polling: true });
     console.log('✅ Telegram bot started (polling mode)');
   } else if (mode === 'webhook') {
-    // In webhook mode, we don't start polling — Express handles incoming updates
+    // In webhook mode, we don't start polling — Express handles incoming updates.
+    // We register the webhook URL with Telegram immediately on startup.
     bot = new TelegramBot(token, { polling: false });
-    console.log('✅ Telegram bot initialized (webhook mode — awaiting webhook setup)');
+
+    const publicUrl = process.env.PUBLIC_URL;
+    if (!publicUrl) {
+      console.error('❌ Telegram webhook error: PUBLIC_URL is not set. Webhook not registered.');
+    } else {
+      const webhookUrl = `${publicUrl}/api/telegram/webhook`;
+      bot.setWebhook(webhookUrl)
+        .then(() => {
+          console.log(`✅ Telegram webhook registered: ${webhookUrl}`);
+        })
+        .catch((err) => {
+          console.error(`❌ Telegram webhook registration failed: ${err.message}`);
+        });
+    }
   } else {
     console.error(`❌ Unknown TELEGRAM_MODE: ${mode}. Use "polling" or "webhook".`);
     return null;
